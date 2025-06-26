@@ -1,25 +1,51 @@
 #include "wifi_embebido.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
+#include "esp_netif.h"
+#include <stdbool.h>
 #include <string.h>
 
-static const char *TAG = "WiFi";
+static const char *TAG = "Módulo WiFi: ";
+static EventGroupHandle_t wifi_event_group;
+#define WIFI_CONNECTED_BIT BIT0
 
 // Manejador de eventos
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data) {
+
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
+        ESP_LOGI(TAG, "Intentando conectar a la red...");
+
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
         ESP_LOGI(TAG, "Conectado a la red WiFi");
+
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ESP_LOGI(TAG, "IP obtenida correctamente");
+        if (wifi_event_group != NULL) {
+            xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+            ESP_LOGI(TAG, "IP obtenida correctamente");
+        } else {
+            ESP_LOGE(TAG, "wifi_event_group no inicializado.");
+        }
+
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START) {
         ESP_LOGI(TAG, "Modo AP iniciado");
+
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        esp_wifi_connect();
+        if (wifi_event_group != NULL) {
+            xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        } else {
+            ESP_LOGE(TAG, "wifi_event_group no inicializado.");
+        }
+        ESP_LOGW(TAG, "Desconectado, reintentando...");
     }
 }
+
 
 // Modo estación (STA)
 void iniciar_wifi_sta(const char *ssid, const char *password) {
@@ -32,9 +58,7 @@ void iniciar_wifi_sta(const char *ssid, const char *password) {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
 
-    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL);
-
+    
     wifi_config_t wifi_config = {
         .sta = {
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
@@ -44,10 +68,15 @@ void iniciar_wifi_sta(const char *ssid, const char *password) {
             }
         },
     };
-
+    
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
+    wifi_event_group = xEventGroupCreate();
+    
+    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL);
+    
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     esp_wifi_start();
@@ -84,4 +113,22 @@ void iniciar_wifi_ap(const char *ssid, const char *password) {
     esp_wifi_set_mode(WIFI_MODE_AP);
     esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
     esp_wifi_start();
+}
+
+bool wifi_esta_conectado(void)
+{
+    if (wifi_event_group == NULL) {
+        ESP_LOGE(TAG, "wifi_event_group no inicializado (func: wifi_esta_conectado)");
+        return false;
+    }
+
+    EventBits_t bits = xEventGroupWaitBits(
+        wifi_event_group,
+        WIFI_CONNECTED_BIT,
+        pdFALSE,
+        pdTRUE,
+        pdMS_TO_TICKS(10000)
+    );
+
+    return (bits & WIFI_CONNECTED_BIT);
 }
