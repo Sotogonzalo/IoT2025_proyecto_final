@@ -77,5 +77,5 @@ void start_task_c(QueueHandle_t queue, SemaphoreHandle_t semaforo, led_color_t *
     xSemaforoColor = semaforo;
     color_ptr = shared_color;
 
-    xTaskCreate(vTaskC, "task_c", 4096, NULL, 5, NULL);
+    xTaskCreate(vTaskC, "task_c", 2048, NULL, 5, NULL);
 }

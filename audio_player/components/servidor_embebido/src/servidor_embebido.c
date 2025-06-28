@@ -5,7 +5,7 @@
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 
-static const char *TAG = "ServidorWeb";
+static const char *TAG = "Módulo Servidor Web:";
 
 esp_err_t raiz_get_handler(httpd_req_t *req) {
     const uint32_t html_len = index_html_end - index_html_start;

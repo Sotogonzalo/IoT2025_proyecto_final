@@ -91,5 +91,5 @@ void taskB_uart_init(void) {
 
 void start_task_b(QueueHandle_t queue) {
     taskB_queue = queue;
-    xTaskCreate(vTaskB, "TaskB", 4096, NULL, 10, NULL);
+    xTaskCreate(vTaskB, "TaskB", 2048, NULL, 10, NULL);
 }

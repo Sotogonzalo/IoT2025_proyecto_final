@@ -1,0 +1,5 @@
+menu "Audio Embebido Config"
+    config AUDIO_EMBEBIDO_PA_CTRL_IO
+        int "GPIO de control del amplificador (PA)"
+        default 10
+endmenu

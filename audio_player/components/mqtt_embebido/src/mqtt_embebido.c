@@ -7,10 +7,9 @@
 #define MI_ID      "ESP32S2_A"
 #define TOPIC_RX   "iot/demo/" MI_ID "/rx"
 
-static const char *TAG = "MQTT_EMBEBIDO";
+static const char *TAG = "Módulo MQTT:";
 static esp_mqtt_client_handle_t client = NULL;
 
-/* Callback del evento MQTT */
 static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_mqtt_event_handle_t event = event_data;
 
@@ -29,7 +28,6 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_i
         data[event->data_len] = '\0';
 
         ESP_LOGI(TAG, "RX [%s]: %s", topic, data);
-        // Aquí podrías delegar el procesamiento a un callback externo
         break;
     }
 
