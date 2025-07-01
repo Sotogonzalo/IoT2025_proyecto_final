@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Proyecto IoT - Panel de Configuración y Control</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f9f9f9;
+      padding: 20px;
+      max-width: 800px;
+      margin: auto;
+    }
+
+    h2 {
+      border-bottom: 2px solid #ccc;
+      padding-bottom: 4px;
+    }
+
+    form, .control-section {
+      background: #fff;
+      padding: 16px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.05);
+    }
+
+    input, button {
+      margin: 5px 0;
+      padding: 8px;
+      font-size: 1em;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    #estado {
+      font-style: italic;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>WiFi (STA)</h2>
+  <form id="wifi-form">
+    SSID: <input type="text" name="ssid"><br>
+    Password: <input type="password" name="password"><br>
+    <button type="submit">Guardar WiFi</button>
+  </form>
+
+  <h2>MQTT</h2>
+  <form id="mqtt-form">
+    Broker URI: <input type="text" name="mqtt_uri"><br>
+    Puerto: <input type="number" name="mqtt_port"><br>
+    <button type="submit">Guardar MQTT</button>
+  </form>
+
+  <h2>Subir canción (.pcm, máximo 15 segundos)</h2>
+  <form id="form-subir" enctype="multipart/form-data">
+    <input type="file" name="cancion" accept=".pcm" required>
+    <button type="submit">Subir .PCM</button>
+  </form>
+
+  <h2>Controles de Reproducción</h2>
+  <div class="control-section">
+    <button onclick="sendCommand('play')">Play</button>
+    <button onclick="sendCommand('pause')">Pause</button>
+    <button onclick="sendCommand('stop')">Stop</button>
+    <button onclick="sendCommand('next')">Siguiente</button>
+    <button onclick="sendCommand('prev')">Anterior</button>
+    <button onclick="sendCommand('volup')">Vol +</button>
+    <button onclick="sendCommand('voldown')">Vol -</button>
+  </div>
+
+  <script>
+    function sendCommand(cmd) {
+      fetch('/comando', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ accion: cmd })
+      });
+    }
+
+    document.getElementById('wifi-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const formData = new FormData(this);
+      const obj = Object.fromEntries(formData);
+      fetch('/config_wifi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(obj)
+      });
+    });
+
+    document.getElementById('mqtt-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const formData = new FormData(this);
+      const obj = Object.fromEntries(formData);
+      obj.mqtt_port = parseInt(obj.mqtt_port);
+      fetch('/config_mqtt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(obj)
+      });
+    });
+
+    document.getElementById('form-subir').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const formData = new FormData(this);
+      fetch('/upload_pcm', {
+        method: 'POST',
+        body: formData
+      }).then(res => res.text()).then(msg => alert(msg));
+    });
+  </script>
+
+</body>
+</html>

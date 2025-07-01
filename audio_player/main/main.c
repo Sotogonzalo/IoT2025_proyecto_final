@@ -9,33 +9,8 @@
 #include "audio_embebido.h"
 #include <math.h>
 
-// #define WIFI_SSID  "Fraga" // nombre de la red
-// #define WIFI_PASS  "Fraga188" // contraseña de la red
-// #define MI_ID      "ESP32S2_A"
-// #define TOPIC_TX   "iot/demo/" MI_ID "/tx"
 #define TAG        "MAIN"
 #define BUFFER_TAM 512
-
-extern const uint8_t music_pcm_start[] asm("_binary_canon_pcm_start");
-extern const uint8_t music_pcm_end[]   asm("_binary_canon_pcm_end");
-
-// static void publisher_task(void *arg)
-// {
-//     int contador = 0;
-
-//     while (1) {
-//         char mensaje[64];
-//         snprintf(mensaje, sizeof(mensaje),
-//                  "Mensaje #%d desde %s", ++contador, MI_ID);
-
-//         mqtt_embebido_publicar_json(TOPIC_TX, mensaje);
-//         ESP_LOGI(TAG, "Publicado: %s", mensaje);
-
-//         vTaskDelay(pdMS_TO_TICKS(30000)); //30s
-//     }
-// }
-
-// En main.c o archivo propio
 
 static void audio_embebido_task(void *args)
 {
@@ -77,18 +52,34 @@ void app_main(void)
     } else {
         ESP_LOGE("MAIN", "Error al inicializar el sistema de audio.");
     }
-    // // Inicialización del Wifi
-    // iniciar_wifi_sta(WIFI_SSID, WIFI_PASS);
-
-    // if (!wifi_esta_conectado()) {
-    //     ESP_LOGE(TAG, "No se pudo conectar al WiFi");
-    //     return;
-    // }
-    // // // Inicialización del servidor web
-    // // iniciar_servidor_web();
-
-    // // Inicialización del cliente MQTT
-    // mqtt_embebido_start();
-
-    // xTaskCreate(publisher_task, "publisher", 2048, NULL, 5, NULL);
 }
+
+
+////////////////// PRUEBA DE SERVIDOR EMBEBIDO //////////////////////
+// #include <stdio.h>
+// #include "freertos/FreeRTOS.h"
+// #include "freertos/task.h"
+// #include "esp_log.h"
+// #include "wifi_embebido.h"
+// #include "servidor_embebido.h"
+// #include "spiffs_embebido.h"
+// #include "audio_embebido.h"
+// #include "mqtt_embebido.h"
+
+// void app_main(void)
+// {
+//     montar_spiffs();
+
+//     audio_embebido_iniciar();
+//     // Iniciar en modo AP
+//     // iniciar_wifi_ap("ESP-CONFIG", "12345678");
+//     iniciar_wifi_sta("caliope", "sinlugar");
+
+//     iniciar_servidor_web();
+
+//     // ESP_LOGI("MAIN", "Servidor web iniciado. Conectate a 'ESP-CONFIG' y entrá a http://192.168.4.1");
+
+//     while (1) {
+//         vTaskDelay(pdMS_TO_TICKS(1000));
+//     }
+// }

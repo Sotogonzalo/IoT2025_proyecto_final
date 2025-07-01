@@ -3,13 +3,36 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "es8311.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include <string.h>
 
 #define TAG "AUDIO_EMBEBIDO"
+#define MAX_CANCIONES 5
+#define MAX_VOL 100
+#define MIN_VOL 0
+#define VOL_STEP 10
 
 static i2s_chan_handle_t tx_handle = NULL;
 static es8311_handle_t es_handle = NULL;
+
+static char lista_paths[MAX_CANCIONES][64];  // Paths a archivos .pcm
+static int total_canciones = 0;
+static int cancion_actual = 0;
+
+static audio_estado_t estado = AUDIO_STOPPED;
+static int volumen_actual = 70;
+
+static SemaphoreHandle_t mutex_estado;
+static TaskHandle_t task_reproduccion = NULL;
+
+static void tarea_reproduccion(void *param);
+
+i2s_chan_handle_t audio_embebido_get_tx_handle(void) {
+    return tx_handle;
+}
 
 esp_err_t audio_embebido_iniciar(void) {
     // I2C init
@@ -66,7 +89,7 @@ esp_err_t audio_embebido_iniciar(void) {
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
 
-    // PA enable
+    // pin PA para el stereo
     gpio_config_t gpio_cfg = {
         .pin_bit_mask = (1ULL << PA_CTRL_IO),
         .mode = GPIO_MODE_OUTPUT
@@ -74,19 +97,116 @@ esp_err_t audio_embebido_iniciar(void) {
     ESP_ERROR_CHECK(gpio_config(&gpio_cfg));
     ESP_ERROR_CHECK(gpio_set_level(PA_CTRL_IO, 1));
 
+    // Init del mutex
+    mutex_estado = xSemaphoreCreateMutex();
+
     return ESP_OK;
 }
 
-void audio_embebido_reproducir(const uint8_t *ptr, size_t len) {
-    size_t written = 0;
+esp_err_t audio_embebido_cargar_lista(const char *const *paths, int cantidad) {
+    if (cantidad > MAX_CANCIONES) return ESP_ERR_INVALID_ARG;
 
-    while (1) {
-        i2s_channel_write(tx_handle, ptr, len, &written, portMAX_DELAY);
-        ESP_LOGI(TAG, "Reproducidos %d bytes", (int)written);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    for (int i = 0; i < cantidad; i++) {
+        strncpy(lista_paths[i], paths[i], sizeof(lista_paths[i]));
     }
+
+    total_canciones = cantidad;
+    cancion_actual = 0;
+    return ESP_OK;
 }
 
-i2s_chan_handle_t audio_embebido_get_tx_handle(void) {
-    return tx_handle;
+
+void audio_embebido_play(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    if (estado == AUDIO_STOPPED || estado == AUDIO_PAUSED) {
+        estado = AUDIO_PLAYING;
+        if (task_reproduccion == NULL) {
+            xTaskCreate(tarea_reproduccion, "tarea_audio", 4096, NULL, 5, &task_reproduccion);
+        }
+    }
+    xSemaphoreGive(mutex_estado);
+}
+
+void audio_embebido_pause(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    if (estado == AUDIO_PLAYING) estado = AUDIO_PAUSED;
+    xSemaphoreGive(mutex_estado);
+}
+
+void audio_embebido_stop(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    estado = AUDIO_STOPPED;
+    xSemaphoreGive(mutex_estado);
+}
+
+void audio_embebido_next(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    cancion_actual = (cancion_actual + 1) % total_canciones;
+    estado = AUDIO_PLAYING;
+    xSemaphoreGive(mutex_estado);
+}
+
+void audio_embebido_prev(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    cancion_actual = (cancion_actual - 1 + total_canciones) % total_canciones;
+    estado = AUDIO_PLAYING;
+    xSemaphoreGive(mutex_estado);
+}
+
+void audio_embebido_volup(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    if (volumen_actual < MAX_VOL) volumen_actual += VOL_STEP;
+    es8311_voice_volume_set(es_handle, volumen_actual, NULL);
+    xSemaphoreGive(mutex_estado);
+}
+
+void audio_embebido_voldown(void) {
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    if (volumen_actual > MIN_VOL) volumen_actual -= VOL_STEP;
+    es8311_voice_volume_set(es_handle, volumen_actual, NULL);
+    xSemaphoreGive(mutex_estado);
+}
+
+static void tarea_reproduccion(void *param) {
+    while (1) {
+        xSemaphoreTake(mutex_estado, portMAX_DELAY);
+        if (estado == AUDIO_STOPPED) {
+            task_reproduccion = NULL;
+            xSemaphoreGive(mutex_estado);
+            vTaskDelete(NULL);
+        } else if (estado == AUDIO_PAUSED) {
+            xSemaphoreGive(mutex_estado);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        char path_actual[64];
+        strncpy(path_actual, lista_paths[cancion_actual], sizeof(path_actual));
+        xSemaphoreGive(mutex_estado);
+
+        FILE *f = fopen(path_actual, "rb");
+        if (!f) {
+            ESP_LOGE(TAG, "No se pudo abrir %s", path_actual);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        uint8_t buffer[512];
+        size_t leido = 0;
+
+        while ((leido = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+            xSemaphoreTake(mutex_estado, portMAX_DELAY);
+            if (estado != AUDIO_PLAYING) {
+                xSemaphoreGive(mutex_estado);
+                break;
+            }
+            xSemaphoreGive(mutex_estado);
+
+            size_t escrito = 0;
+            i2s_channel_write(tx_handle, buffer, leido, &escrito, portMAX_DELAY);
+        }
+
+        fclose(f);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
