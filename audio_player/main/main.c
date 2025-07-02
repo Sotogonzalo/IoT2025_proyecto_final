@@ -5,18 +5,20 @@
 #include "wifi_embebido.h"
 #include "servidor_embebido.h"
 #include "mqtt_embebido.h"
+#include "event_logger.h"
 
-#define WIFI_SSID  "host" // nombre de la red
-#define WIFI_PASS  "pass" // contraseña de la red
-#define MI_ID      "ESP32S2_A"
-#define TOPIC_TX   "iot/demo/" MI_ID "/tx"
-#define TAG        "MQTT_MAIN"
+#define WIFI_SSID "host" // nombre de la red
+#define WIFI_PASS "pass" // contraseña de la red
+#define MI_ID "ESP32S2_A"
+#define TOPIC_TX "iot/demo/" MI_ID "/tx"
+#define TAG "MQTT_MAIN"
 
 static void publisher_task(void *arg)
 {
     int contador = 0;
 
-    while (1) {
+    while (1)
+    {
         char mensaje[64];
         snprintf(mensaje, sizeof(mensaje),
                  "Mensaje #%d desde %s", ++contador, MI_ID);
@@ -24,7 +26,7 @@ static void publisher_task(void *arg)
         mqtt_embebido_publicar_json(TOPIC_TX, mensaje);
         ESP_LOGI(TAG, "Publicado: %s", mensaje);
 
-        vTaskDelay(pdMS_TO_TICKS(30000)); //30s
+        vTaskDelay(pdMS_TO_TICKS(30000)); // 30s
     }
 }
 
