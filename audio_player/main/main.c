@@ -26,6 +26,18 @@ static void publisher_task(void *arg)
         mqtt_embebido_publicar_json(TOPIC_TX, mensaje);
         ESP_LOGI(TAG, "Publicado: %s", mensaje);
 
+        // Obtener hora actual
+        time_t now;
+        struct tm timeinfo;
+        char timestamp[32];
+
+        time(&now);
+        localtime_r(&now, &timeinfo);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+        // Loggear la acción
+        event_logger_add("Mensaje MQTT publicado", timestamp);
+
         vTaskDelay(pdMS_TO_TICKS(30000)); // 30s
     }
 }
@@ -34,6 +46,10 @@ void app_main(void)
 {
     // Inicialización del Wifi
     iniciar_wifi_sta(WIFI_SSID, WIFI_PASS);
+
+    // inicialización del logger
+    event_logger_init();
+    event_logger_print(); // Mostrar los logs guardados antes del reinicio
 
     // Inicialización del servidor web
     iniciar_servidor_web();
