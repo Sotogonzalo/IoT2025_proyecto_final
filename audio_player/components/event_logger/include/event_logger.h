@@ -1,5 +1,9 @@
 // para que el archivo del encabezado se incluya solo una vez
-#pragma once
+#ifndef EVENT_LOGGER_H
+#define EVENT_LOGGER_H
+
+#include "event_logger.h"
+#include <time.h>
 
 #define LOG_CAPACIDAD 20
 
@@ -17,3 +21,5 @@ void event_logger_add(const char *accion, const char *timestamp);
 
 // Muestra en consola todo el buffer
 void event_logger_print(void);
+
+#endif

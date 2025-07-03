@@ -7,8 +7,8 @@
 #include "mqtt_embebido.h"
 #include "event_logger.h"
 
-#define WIFI_SSID "host" // nombre de la red
-#define WIFI_PASS "pass" // contraseña de la red
+#define WIFI_SSID "Wifi"         // nombre de la red
+#define WIFI_PASS "diegosan5677" // contraseña de la red
 #define MI_ID "ESP32S2_A"
 #define TOPIC_TX "iot/demo/" MI_ID "/tx"
 #define TAG "MQTT_MAIN"

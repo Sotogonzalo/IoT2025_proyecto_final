@@ -2,6 +2,7 @@
 #include <string.h>
 #include "nvs_flash.h"
 #include "nvs.h"
+#include <time.h>
 #include "event_logger.h"
 
 static entrada_log_t buffer_log[LOG_CAPACIDAD];

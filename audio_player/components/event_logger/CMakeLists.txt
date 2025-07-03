@@ -1,2 +1,7 @@
-idf_component_register(SRCS "event_logger.c"
-                      INCLUDE_DIRS "include")
+set(component_srcs "src/event_logger.c")
+
+idf_component_register(SRCS "${component_srcs}"
+                       INCLUDE_DIRS "include"
+                       PRIV_INCLUDE_DIRS ""
+                       PRIV_REQUIRES ""
+                       REQUIRES "nvs_flash")
