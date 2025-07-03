@@ -35,7 +35,18 @@ void obtener_timestamp_actual(char *destino, size_t max_len)
     time(&now);
     localtime_r(&now, &timeinfo);
 
-    if (timeinfo.tm_year < (2016 - 1900))
+    if (timeinfo.t// guarda buffer circular en la flash
+static void guardar_buffer_nvs()
+{
+    nvs_handle_t handle;
+    if (nvs_open("storage", NVS_READWRITE, &handle) != ESP_OK)
+        return;
+    nvs_set_blob(handle, "log_buffer", buffer_log, sizeof(buffer_log));
+    nvs_set_u8(handle, "log_index", log_index);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+// carga el buffer ya guardado de la flash m_year < (2016 - 1900))
     {
         printf("⚠️ Hora no sincronizada aún. Sincronizando...\n");
         sincronizar_hora_ntp();
