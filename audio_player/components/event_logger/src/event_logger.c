@@ -9,6 +9,19 @@
 static entrada_log_t buffer_log[LOG_CAPACIDAD];
 static uint8_t log_index = 0;
 
+void event_logger_log_action(const char *accion, const char *cancion)
+{
+    char timestamp[32];
+    obtener_timestamp_actual(timestamp, sizeof(timestamp));
+
+    strncpy(buffer_log[log_index].accion, accion, sizeof(buffer_log[log_index].accion));
+    strncpy(buffer_log[log_index].cancion, cancion, sizeof(buffer_log[log_index].cancion));
+    strncpy(buffer_log[log_index].timestamp, timestamp, sizeof(buffer_log[log_index].timestamp));
+
+    log_index = (log_index + 1) % LOG_CAPACIDAD;
+    guardar_buffer_nvs();
+}
+
 // guarda buffer circular en la flash
 static void guardar_buffer_nvs()
 {
@@ -54,7 +67,10 @@ void event_logger_print(void)
     {
         if (strlen(buffer_log[i].accion) > 0)
         {
-            printf("[%02d] Acción: %s - Hora: %s\n", i, buffer_log[i].accion, buffer_log[i].timestamp);
+            printf("[%02d] Acción: %s | Canción: %s | Hora: %s\n", i,
+                   buffer_log[i].accion,
+                   buffer_log[i].cancion,
+                   buffer_log[i].timestamp);
         }
     }
 }

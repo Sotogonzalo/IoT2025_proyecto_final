@@ -10,8 +10,12 @@
 typedef struct
 {
     char accion[32];
+    char cancion[64];
     char timestamp[32];
 } entrada_log_t;
+
+// Guarda una acción del tipo (acción, canción, timestamp)
+void event_logger_log_action(const char *accion, const char *cancion);
 
 // Inicializa y carga buffer desde NVS
 void event_logger_init(void);
