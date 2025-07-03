@@ -10,8 +10,10 @@
 #include "audio_embebido.h"
 #include "config_embebido.h"
 #include "wifi_embebido.h"
-#include "mqtt_embebido.h"
 #include "queue_embebido.h"
+#include "event_logger.h"
+
+extern void mqtt_embebido_start(const char *uri);
 
 httpd_handle_t server = NULL;
 #define HTTPD_507_INSUFFICIENT_STORAGE 507
@@ -257,6 +259,15 @@ static esp_err_t comando_post_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Handler POST /ver_log
+static esp_err_t ver_log_post_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Solicitud /ver_log recibida, imprimiendo log en consola...");
+    event_logger_print();
+
+    httpd_resp_sendstr(req, "Log impreso en consola");
+    return ESP_OK;
+}
+
 // Handler POST /upload
 static esp_err_t upload_pcm_handler(httpd_req_t *req) {
     static int contador = 0;
@@ -430,6 +441,10 @@ httpd_handle_t iniciar_servidor_web(void) {
         // POST /comando
         httpd_register_uri_handler(server, &(httpd_uri_t){
             .uri = "/comando", .method = HTTP_POST, .handler = comando_post_handler });
+
+        // POST /ver_log
+        httpd_register_uri_handler(server, &(httpd_uri_t){
+            .uri = "/ver_log", .method = HTTP_POST, .handler = ver_log_post_handler, .user_ctx = NULL});
 
         // POST /upload_pcm
         httpd_register_uri_handler(server, &(httpd_uri_t){

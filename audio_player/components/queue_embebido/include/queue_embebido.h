@@ -4,7 +4,6 @@
 typedef enum {
     CMD_VOLUME_UP,
     CMD_VOLUME_DOWN,
-    CMD_QUEUE_SONG,
     CMD_NEXT_SONG,
     CMD_PREV_SONG,
     CMD_PAUSE,
@@ -19,7 +18,6 @@ music_command_t parse_command(const char *str);
 
 void volume_up(void);
 void volume_down(void);
-void queue_song(void);
 void next_song(void);
 void prev_song(void);
 void pause_song(void);

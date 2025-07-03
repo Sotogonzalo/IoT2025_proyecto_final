@@ -2,22 +2,48 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+
 #include "wifi_embebido.h"
 #include "servidor_embebido.h"
 #include "spiffs_embebido.h"
 #include "audio_embebido.h"
 #include "mqtt_embebido.h"
 #include "queue_embebido.h"
+#include "config_embebido.h"
+#include "tiempo_embebido.h"
+
+#define TAG "MAIN"
 
 void app_main(void)
 {
     montar_spiffs();
-
     audio_embebido_iniciar();
 
-    iniciar_wifi_embebido();
+    // Cargar configuración desde NVS
+    configuracion_t cfg;
+    if (!config_cargar(&cfg)) {
+        ESP_LOGW(TAG, "No se pudo cargar configuración, usando valores por defecto.");
 
-    iniciar_wifi_sta("Fraga", "Fraga188");
+        snprintf(cfg.ssid, CONFIG_MAX_STR, "caliope");
+        snprintf(cfg.password, CONFIG_MAX_STR, "sinlugar");
+        snprintf(cfg.mqtt_uri, CONFIG_MAX_STR, "mqtt://broker.hivemq.com");
+        cfg.mqtt_port = 1883;
+        config_guardar(&cfg);
+
+    } else {
+        ESP_LOGI(TAG, "Configuración cargada: SSID=%s, MQTT=%s:%d", cfg.ssid, cfg.mqtt_uri, cfg.mqtt_port);
+    }
+
+    iniciar_wifi_embebido();
+    iniciar_wifi_sta(cfg.ssid, cfg.password);
+    while(!wifi_esta_conectado()) {
+        ESP_LOGI(TAG, "Esperando conexión WiFi...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    audio_embebido_cargar_estado();
+
+    tiempo_embebido_iniciar();
 
     xTaskCreate(music_player_task, "player_task", 4096, NULL, 5, NULL);
 

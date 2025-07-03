@@ -91,6 +91,7 @@
     <button onclick="sendCommand('prev')">Anterior</button>
     <button onclick="sendCommand('volup')">Vol +</button>
     <button onclick="sendCommand('voldown')">Vol -</button>
+    <button onclick="verLog()">Ver Log</button>
   </div>
 
   <h2>Canciones en SPIFFS</h2>
@@ -160,6 +161,17 @@
         }).catch(err => alert("Error al subir: " + err));
     });
 
+    function verLog() {
+      fetch('/ver_log', { method: 'POST' })
+        .then(response => response.text())
+        .then(msg => {
+          alert("Log impreso en consola del dispositivo");
+        })
+        .catch(err => {
+          alert("Error al solicitar log: " + err);
+        });
+    }
+
     function cargarListaCanciones() {
       fetch("/canciones")
         .then(res => res.json())
@@ -168,12 +180,27 @@
           ul.innerHTML = "";
           canciones.forEach(path => {
             const li = document.createElement("li");
-            li.textContent = path;
 
+            li.style.display = "flex";
+            li.style.justifyContent = "space-between";
+            li.style.alignItems = "center";
+            li.style.padding = "6px";
+            li.style.borderBottom = "1px solid #ccc";
+
+            const texto = document.createElement("span");
+            texto.textContent = path;
+            texto.style.flexGrow = "1";
+            texto.style.overflow = "hidden";
+            texto.style.textOverflow = "ellipsis";
+            texto.style.whiteSpace = "nowrap";
+            texto.style.marginRight = "10px";
+
+            // Botón eliminar
             const boton = document.createElement("button");
             boton.textContent = "Eliminar";
             boton.onclick = () => eliminarCancion(path);
 
+            li.appendChild(texto);
             li.appendChild(boton);
             ul.appendChild(li);
           });
@@ -181,6 +208,7 @@
           console.warn("No se pudo cargar la lista de canciones:", err);
         });
     }
+
 
     function eliminarCancion(path) {
       fetch("/delete_song", {
@@ -192,7 +220,7 @@
         .then(cargarListaCanciones);
     }
 
-    // Llamar al cargar la página
+    // Llamar al cargar la página para actualizar cuando se sube o elimine una canción
     window.onload = cargarListaCanciones;
   </script>
 

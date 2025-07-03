@@ -9,6 +9,9 @@ typedef struct {
     char password[CONFIG_MAX_STR];
     char mqtt_uri[CONFIG_MAX_STR];
     int mqtt_port;
+    int cancion_idx;
+    int estado_audio;
+    int offset_actual;
 } configuracion_t;
 
 bool config_guardar(const configuracion_t *cfg);

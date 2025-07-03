@@ -8,7 +8,9 @@
 #include "esp_netif.h"
 #include <stdbool.h>
 #include <string.h>
-#include "servidor_embebido.h"
+
+extern void iniciar_servidor_web(void);
+extern void detener_servidor_web(void);
 
 static const char *TAG = "Módulo WiFi";
 

@@ -31,6 +31,8 @@ typedef enum {
 i2s_chan_handle_t audio_embebido_get_tx_handle(void);
 esp_err_t audio_embebido_iniciar(void);
 esp_err_t audio_embebido_cargar_lista(const char *const *rutas_canciones, int cantidad);
+void audio_embebido_guardar_estado(void);
+void audio_embebido_cargar_estado(void);
 
 void audio_embebido_play(void);
 void audio_embebido_pause(void);

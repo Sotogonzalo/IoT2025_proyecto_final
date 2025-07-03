@@ -8,6 +8,8 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 #include <string.h>
+#include "config_embebido.h"
+#include "event_logger.h"
 
 #define TAG "AUDIO_EMBEBIDO"
 #define MAX_CANCIONES 5
@@ -24,7 +26,7 @@ static int total_canciones = 0;
 static int cancion_actual = 0;
 
 static audio_estado_t estado = AUDIO_STOPPED;
-static int volumen_actual = 70;
+static int volumen_actual = 50;
 
 static SemaphoreHandle_t mutex_estado;
 static TaskHandle_t task_reproduccion = NULL;
@@ -177,7 +179,10 @@ void audio_embebido_play(void) {
     }
 
     estado = AUDIO_PLAYING;
+    audio_embebido_guardar_estado();
     ESP_LOGI(TAG, "Reproducción iniciada o reanudada");
+
+    event_logger_log_action("play", lista_paths[cancion_actual]);
 
     // Crear tarea de reproducción si no existe
     if (task_reproduccion == NULL) {
@@ -192,7 +197,9 @@ void audio_embebido_pause(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
     if (estado == AUDIO_PLAYING) {
         estado = AUDIO_PAUSED;
+        audio_embebido_guardar_estado();
         ESP_LOGI(TAG, "Reproducción pausada");
+        event_logger_log_action("pause", lista_paths[cancion_actual]);
     } else {
         ESP_LOGI(TAG, "No se puede pausar: el audio no está en reproducción");
     }
@@ -204,7 +211,10 @@ void audio_embebido_stop(void) {
     if (estado == AUDIO_PLAYING || estado == AUDIO_PAUSED) {
         estado = AUDIO_STOPPED;
         offset_actual = 0;
+        audio_embebido_guardar_estado();
         ESP_LOGI(TAG, "Reproducción detenida");
+
+        event_logger_log_action("stop", lista_paths[cancion_actual]);
     } else {
         ESP_LOGI(TAG, "No se puede detener: el audio ya está detenido");
     }
@@ -234,10 +244,11 @@ void audio_embebido_next(void) {
         offset_actual = 0;
         estado = AUDIO_STOPPED;
         ESP_LOGI(TAG, "Siguiente canción seleccionada: %s", lista_paths[cancion_actual]);
+        event_logger_log_action("next", lista_paths[cancion_actual]);
     } else {
         ESP_LOGW(TAG, "No se encontró canción siguiente válida");
     }
-
+    audio_embebido_guardar_estado();
     xSemaphoreGive(mutex_estado);
 }
 
@@ -264,10 +275,11 @@ void audio_embebido_prev(void) {
         offset_actual = 0;
         estado = AUDIO_STOPPED;
         ESP_LOGI(TAG, "Canción anterior seleccionada: %s", lista_paths[cancion_actual]);
+        event_logger_log_action("prev", lista_paths[cancion_actual]);
     } else {
         ESP_LOGW(TAG, "No se encontró canción anterior válida");
     }
-
+    audio_embebido_guardar_estado();
     xSemaphoreGive(mutex_estado);
 }
 
@@ -278,6 +290,7 @@ void audio_embebido_volup(void) {
         if (volumen_actual > MAX_VOL) volumen_actual = MAX_VOL;
         es8311_voice_volume_set(es_handle, volumen_actual, NULL);
         ESP_LOGI(TAG, "Volumen aumentado: %d", volumen_actual);
+        event_logger_log_action("volUp", lista_paths[cancion_actual]);
     } else {
         ESP_LOGI(TAG, "Volumen máximo alcanzado: %d", volumen_actual);
     }
@@ -291,6 +304,7 @@ void audio_embebido_voldown(void) {
         if (volumen_actual < MIN_VOL) volumen_actual = MIN_VOL;
         es8311_voice_volume_set(es_handle, volumen_actual, NULL);
         ESP_LOGI(TAG, "Volumen reducido: %d", volumen_actual);
+        event_logger_log_action("volDown", lista_paths[cancion_actual]);
     } else {
         ESP_LOGI(TAG, "Volumen mínimo alcanzado: %d", volumen_actual);
     }
@@ -356,7 +370,7 @@ static void tarea_reproduccion(void *param) {
         xSemaphoreTake(mutex_estado, portMAX_DELAY);
         if (estado != AUDIO_PLAYING) {
             // Guardamos el offset actual para retomar después
-            offset_actual += ftell(f) - offset_actual;  // Esto es ftell(f) pero lo mismo que ftell porque fread ya avanzó el puntero
+            offset_actual += ftell(f) - offset_actual;
             xSemaphoreGive(mutex_estado);
             break;
         }
@@ -370,7 +384,7 @@ static void tarea_reproduccion(void *param) {
 
     fclose(f);
 
-    // Si terminó la canción (llegó al final del archivo)
+    // Si terminó la canción
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
     if (estado == AUDIO_PLAYING) {
         // Canción terminada, reseteamos offset y estado
@@ -378,6 +392,7 @@ static void tarea_reproduccion(void *param) {
         estado = AUDIO_STOPPED;
     }
     task_reproduccion = NULL;
+    audio_embebido_guardar_estado();
     xSemaphoreGive(mutex_estado);
 
     ESP_LOGI(TAG, "Reproducción finalizada, tarea terminada.");
@@ -385,4 +400,31 @@ static void tarea_reproduccion(void *param) {
     vTaskDelete(NULL);
 }
 
+void audio_embebido_guardar_estado(void) {
+    configuracion_t cfg;
+    if (!config_cargar(&cfg)) {
+        memset(&cfg, 0, sizeof(cfg));
+    }
+    cfg.cancion_idx = cancion_actual;
+    cfg.estado_audio = estado;
+    cfg.offset_actual = offset_actual;
+
+    if (!config_guardar(&cfg)) {
+        ESP_LOGW(TAG, "No se pudo guardar estado audio");
+    }
+}
+
+void audio_embebido_cargar_estado(void) {
+    configuracion_t cfg;
+    if (config_cargar(&cfg)) {
+        cancion_actual = cfg.cancion_idx;
+        estado = cfg.estado_audio;
+        offset_actual = cfg.offset_actual;
+
+        ESP_LOGI(TAG, "Estado restaurado: cancion=%d, estado=%d, offset=%d",
+                 cancion_actual, estado, offset_actual);
+    } else {
+        ESP_LOGI(TAG, "No se pudo cargar estado audio guardado");
+    }
+}
 
