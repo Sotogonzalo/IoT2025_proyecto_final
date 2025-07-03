@@ -47,6 +47,17 @@
       font-style: italic;
       color: #333;
     }
+
+    .song-entry {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px;
+      background: #fff;
+      margin-bottom: 4px;
+      border-radius: 4px;
+      box-shadow: 0 0 2px rgba(0,0,0,0.05);
+    }
   </style>
 </head>
 <body>
@@ -65,7 +76,7 @@
     <button type="submit">Guardar MQTT</button>
   </form>
 
-  <h2>Subir canción (.pcm, máximo 15 segundos)</h2>
+  <h2>Subir canción (.pcm, tamaño máximo 200kb)</h2>
   <form id="form-subir" enctype="multipart/form-data">
     <input type="file" name="cancion" accept=".pcm" required>
     <button type="submit">Subir .PCM</button>
@@ -80,6 +91,11 @@
     <button onclick="sendCommand('prev')">Anterior</button>
     <button onclick="sendCommand('volup')">Vol +</button>
     <button onclick="sendCommand('voldown')">Vol -</button>
+  </div>
+
+  <h2>Canciones en SPIFFS</h2>
+  <div id="lista-canciones">
+    <p id="sin-canciones">Cargando lista...</p>
   </div>
 
   <script>
@@ -116,12 +132,68 @@
 
     document.getElementById('form-subir').addEventListener('submit', function (e) {
       e.preventDefault();
-      const formData = new FormData(this);
+      const input = this.querySelector('input[type="file"]');
+      const archivo = input.files[0];
+
+      if (!archivo) {
+        alert("Seleccioná un archivo primero.");
+        return;
+      }
+
+      const MAX_BYTES = 200 * 1024;
+
+      if (archivo.size > MAX_BYTES) {
+        alert("El archivo excede el tamaño máximo permitido (200 KB).");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("cancion", archivo);
+
       fetch('/upload_pcm', {
         method: 'POST',
         body: formData
-      }).then(res => res.text()).then(msg => alert(msg));
+      }).then(res => res.text())
+        .then(msg => {
+          alert(msg);
+          cargarListaCanciones();
+        }).catch(err => alert("Error al subir: " + err));
     });
+
+    function cargarListaCanciones() {
+      fetch("/canciones")
+        .then(res => res.json())
+        .then(canciones => {
+          const ul = document.getElementById("lista-canciones");
+          ul.innerHTML = "";
+          canciones.forEach(path => {
+            const li = document.createElement("li");
+            li.textContent = path;
+
+            const boton = document.createElement("button");
+            boton.textContent = "Eliminar";
+            boton.onclick = () => eliminarCancion(path);
+
+            li.appendChild(boton);
+            ul.appendChild(li);
+          });
+        }).catch(err => {
+          console.warn("No se pudo cargar la lista de canciones:", err);
+        });
+    }
+
+    function eliminarCancion(path) {
+      fetch("/delete_song", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: path
+      }).then(res => res.text())
+        .then(alert)
+        .then(cargarListaCanciones);
+    }
+
+    // Llamar al cargar la página
+    window.onload = cargarListaCanciones;
   </script>
 
 </body>

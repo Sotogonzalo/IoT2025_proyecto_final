@@ -1,8 +1,7 @@
 #include "mqtt_embebido.h"
-#include "audio_embebido.h"
 #include "esp_log.h"
 #include "cJSON.h"
-// #include "logger.h" // FALTA
+#include "queue_embebido.h"
 
 static const char *TAG = "MQTT";
 static esp_mqtt_client_handle_t client = NULL;
@@ -23,7 +22,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_i
         conectado = true;
         ESP_LOGI(TAG, "MQTT conectado");
         esp_mqtt_client_subscribe(client, TOPIC_RX, 1);
-        // mqtt_embebido_enviar_logger_pendiente();  // Al conectarse, envia eventos pendientes de algun logger o queue de mensajes
+        // mqtt_embebido_enviar_logger_pendiente();  // Al conectarse, envia eventos pendientes
         break;
 
     case MQTT_EVENT_PUBLISHED:
@@ -53,14 +52,12 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_i
         if (cJSON_IsString(accion)) {
             ESP_LOGI(TAG, "Acción MQTT: %s", accion->valuestring);
 
-            if      (strcmp(accion->valuestring, "play") == 0)     audio_embebido_play();
-            else if (strcmp(accion->valuestring, "pause") == 0)    audio_embebido_pause();
-            else if (strcmp(accion->valuestring, "stop") == 0)     audio_embebido_stop();
-            else if (strcmp(accion->valuestring, "next") == 0)     audio_embebido_next();
-            else if (strcmp(accion->valuestring, "prev") == 0)     audio_embebido_prev();
-            else if (strcmp(accion->valuestring, "volup") == 0)    audio_embebido_volup();
-            else if (strcmp(accion->valuestring, "voldown") == 0)  audio_embebido_voldown();
-            else ESP_LOGW(TAG, "Comando MQTT desconocido: %s", accion->valuestring);
+            music_command_t cmd = parse_command(accion->valuestring);
+            if (cmd != CMD_INVALID) {
+                push_command(cmd);
+            } else {
+                ESP_LOGW(TAG, "Comando MQTT desconocido o no soportado: %s", accion->valuestring);
+            }
         }
 
         cJSON_Delete(root);

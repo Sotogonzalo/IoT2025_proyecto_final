@@ -18,6 +18,7 @@
 static i2s_chan_handle_t tx_handle = NULL;
 static es8311_handle_t es_handle = NULL;
 
+static size_t offset_actual = 0;
 static char lista_paths[MAX_CANCIONES][64];  // Paths a archivos .pcm
 static int total_canciones = 0;
 static int cancion_actual = 0;
@@ -104,109 +105,284 @@ esp_err_t audio_embebido_iniciar(void) {
 }
 
 esp_err_t audio_embebido_cargar_lista(const char *const *paths, int cantidad) {
-    if (cantidad > MAX_CANCIONES) return ESP_ERR_INVALID_ARG;
+    if (cantidad > MAX_CANCIONES || cantidad < 0) return ESP_ERR_INVALID_ARG;
 
-    for (int i = 0; i < cantidad; i++) {
-        strncpy(lista_paths[i], paths[i], sizeof(lista_paths[i]));
+    // Limpiar toda la lista
+    for (int i = 0; i < MAX_CANCIONES; i++) {
+        lista_paths[i][0] = '\0';
     }
 
-    total_canciones = cantidad;
-    cancion_actual = 0;
+    total_canciones = 0;
+
+    for (int i = 0; i < cantidad; i++) {
+        if (paths[i] == NULL || strlen(paths[i]) == 0) {
+            ESP_LOGW(TAG, "Path inválido ignorado en índice %d", i);
+            continue;
+        }
+
+        strncpy(lista_paths[total_canciones], paths[i], sizeof(lista_paths[0]) - 1);
+        lista_paths[total_canciones][sizeof(lista_paths[0]) - 1] = '\0';
+        total_canciones++;
+    }
+
+    // Mostrar lista de reproducción
+    ESP_LOGI(TAG, "Lista de reproducción cargada (%d canciones):", total_canciones);
+    for (int i = 0; i < total_canciones; i++) {
+        ESP_LOGI(TAG, "  [%d] %s", i, lista_paths[i]);
+    }
+
+    // Manejo de cancion_actual
+    if (total_canciones == 0) {
+        cancion_actual = 0;
+        audio_embebido_stop();
+        ESP_LOGI(TAG, "Lista vacía: reproducción detenida");
+    } else {
+        if (cancion_actual >= total_canciones || strlen(lista_paths[cancion_actual]) == 0) {
+            cancion_actual = 0;
+            ESP_LOGI(TAG, "Reinicio índice actual a 0");
+        }
+    }
+
     return ESP_OK;
 }
 
+static void log_info_cancion(void) {
+    ESP_LOGI(TAG, "Reproduciendo: %s", lista_paths[cancion_actual]);
+
+    if (total_canciones > 1) {
+        int anterior = (cancion_actual - 1 + total_canciones) % total_canciones;
+        int siguiente = (cancion_actual + 1) % total_canciones;
+        ESP_LOGI(TAG, "Anterior: %s", lista_paths[anterior]);
+        ESP_LOGI(TAG, "Siguiente: %s", lista_paths[siguiente]);
+    } else {
+        ESP_LOGI(TAG, "No hay canciones anterior/siguiente");
+    }
+}
 
 void audio_embebido_play(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    if (estado == AUDIO_STOPPED || estado == AUDIO_PAUSED) {
-        estado = AUDIO_PLAYING;
-        if (task_reproduccion == NULL) {
-            xTaskCreate(tarea_reproduccion, "tarea_audio", 4096, NULL, 5, &task_reproduccion);
-        }
+
+    // Validar que haya canciones válidas
+    if (total_canciones == 0 || strlen(lista_paths[cancion_actual]) == 0) {
+        ESP_LOGI(TAG, "No hay canciones en la lista de reproducción");
+        xSemaphoreGive(mutex_estado);
+        return;
     }
+
+    // Si ya está reproduciendo, no hacemos nada
+    if (estado == AUDIO_PLAYING) {
+        ESP_LOGI(TAG, "Reproducción ya activa");
+        xSemaphoreGive(mutex_estado);
+        return;
+    }
+
+    estado = AUDIO_PLAYING;
+    ESP_LOGI(TAG, "Reproducción iniciada o reanudada");
+
+    // Crear tarea de reproducción si no existe
+    if (task_reproduccion == NULL) {
+        ESP_LOGI(TAG, "Creando tarea de reproducción");
+        xTaskCreate(tarea_reproduccion, "tarea_audio", 4096, NULL, 5, &task_reproduccion);
+    }
+
     xSemaphoreGive(mutex_estado);
 }
 
 void audio_embebido_pause(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    if (estado == AUDIO_PLAYING) estado = AUDIO_PAUSED;
+    if (estado == AUDIO_PLAYING) {
+        estado = AUDIO_PAUSED;
+        ESP_LOGI(TAG, "Reproducción pausada");
+    } else {
+        ESP_LOGI(TAG, "No se puede pausar: el audio no está en reproducción");
+    }
     xSemaphoreGive(mutex_estado);
 }
 
 void audio_embebido_stop(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    estado = AUDIO_STOPPED;
+    if (estado == AUDIO_PLAYING || estado == AUDIO_PAUSED) {
+        estado = AUDIO_STOPPED;
+        offset_actual = 0;
+        ESP_LOGI(TAG, "Reproducción detenida");
+    } else {
+        ESP_LOGI(TAG, "No se puede detener: el audio ya está detenido");
+    }
     xSemaphoreGive(mutex_estado);
 }
 
 void audio_embebido_next(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    cancion_actual = (cancion_actual + 1) % total_canciones;
-    estado = AUDIO_PLAYING;
+
+    if (total_canciones <= 1) {
+        ESP_LOGI(TAG, "No hay siguiente canción válida");
+        xSemaphoreGive(mutex_estado);
+        return;
+    }
+
+    int nueva_pos = cancion_actual;
+    for (int i = 1; i < MAX_CANCIONES; i++) {
+        int idx = (cancion_actual + i) % MAX_CANCIONES;
+        if (strlen(lista_paths[idx]) > 0) {
+            nueva_pos = idx;
+            break;
+        }
+    }
+
+    if (nueva_pos != cancion_actual) {
+        cancion_actual = nueva_pos;
+        offset_actual = 0;
+        estado = AUDIO_STOPPED;
+        ESP_LOGI(TAG, "Siguiente canción seleccionada: %s", lista_paths[cancion_actual]);
+    } else {
+        ESP_LOGW(TAG, "No se encontró canción siguiente válida");
+    }
+
     xSemaphoreGive(mutex_estado);
 }
 
 void audio_embebido_prev(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    cancion_actual = (cancion_actual - 1 + total_canciones) % total_canciones;
-    estado = AUDIO_PLAYING;
+
+    if (total_canciones <= 1) {
+        ESP_LOGI(TAG, "No hay canción anterior válida");
+        xSemaphoreGive(mutex_estado);
+        return;
+    }
+
+    int nueva_pos = cancion_actual;
+    for (int i = 1; i < MAX_CANCIONES; i++) {
+        int idx = (cancion_actual - i + MAX_CANCIONES) % MAX_CANCIONES;
+        if (strlen(lista_paths[idx]) > 0) {
+            nueva_pos = idx;
+            break;
+        }
+    }
+
+    if (nueva_pos != cancion_actual) {
+        cancion_actual = nueva_pos;
+        offset_actual = 0;
+        estado = AUDIO_STOPPED;
+        ESP_LOGI(TAG, "Canción anterior seleccionada: %s", lista_paths[cancion_actual]);
+    } else {
+        ESP_LOGW(TAG, "No se encontró canción anterior válida");
+    }
+
     xSemaphoreGive(mutex_estado);
 }
 
 void audio_embebido_volup(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    if (volumen_actual < MAX_VOL) volumen_actual += VOL_STEP;
-    es8311_voice_volume_set(es_handle, volumen_actual, NULL);
+    if (volumen_actual < MAX_VOL) {
+        volumen_actual += VOL_STEP;
+        if (volumen_actual > MAX_VOL) volumen_actual = MAX_VOL;
+        es8311_voice_volume_set(es_handle, volumen_actual, NULL);
+        ESP_LOGI(TAG, "Volumen aumentado: %d", volumen_actual);
+    } else {
+        ESP_LOGI(TAG, "Volumen máximo alcanzado: %d", volumen_actual);
+    }
     xSemaphoreGive(mutex_estado);
 }
 
 void audio_embebido_voldown(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
-    if (volumen_actual > MIN_VOL) volumen_actual -= VOL_STEP;
-    es8311_voice_volume_set(es_handle, volumen_actual, NULL);
+    if (volumen_actual > MIN_VOL) {
+        volumen_actual -= VOL_STEP;
+        if (volumen_actual < MIN_VOL) volumen_actual = MIN_VOL;
+        es8311_voice_volume_set(es_handle, volumen_actual, NULL);
+        ESP_LOGI(TAG, "Volumen reducido: %d", volumen_actual);
+    } else {
+        ESP_LOGI(TAG, "Volumen mínimo alcanzado: %d", volumen_actual);
+    }
     xSemaphoreGive(mutex_estado);
 }
 
 static void tarea_reproduccion(void *param) {
-    while (1) {
-        xSemaphoreTake(mutex_estado, portMAX_DELAY);
-        if (estado == AUDIO_STOPPED) {
-            task_reproduccion = NULL;
-            xSemaphoreGive(mutex_estado);
-            vTaskDelete(NULL);
-        } else if (estado == AUDIO_PAUSED) {
-            xSemaphoreGive(mutex_estado);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            continue;
-        }
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
 
-        char path_actual[64];
-        strncpy(path_actual, lista_paths[cancion_actual], sizeof(path_actual));
+    if (total_canciones == 0) {
+        ESP_LOGW(TAG, "No hay canciones en la lista de reproducción.");
+        task_reproduccion = NULL;
+        offset_actual = 0;
+        xSemaphoreGive(mutex_estado);
+        vTaskDelete(NULL);
+    }
+
+    if (estado == AUDIO_STOPPED) {
+        task_reproduccion = NULL;
+        offset_actual = 0;
+        xSemaphoreGive(mutex_estado);
+        vTaskDelete(NULL);
+    }
+
+    char path_actual[64];
+    strncpy(path_actual, lista_paths[cancion_actual], sizeof(path_actual));
+    path_actual[sizeof(path_actual) - 1] = '\0';
+
+    if (strlen(path_actual) == 0) {
+        ESP_LOGE(TAG, "Canción actual vacía. No se reproduce.");
+        task_reproduccion = NULL;
+        offset_actual = 0;
+        xSemaphoreGive(mutex_estado);
+        vTaskDelete(NULL);
+    }
+
+    ESP_LOGI(TAG, "Iniciando reproducción: %s desde offset %d", path_actual, (int)offset_actual);
+    log_info_cancion();
+
+    xSemaphoreGive(mutex_estado);
+
+    FILE *f = fopen(path_actual, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "No se pudo abrir %s", path_actual);
+        task_reproduccion = NULL;
+        offset_actual = 0;
+        vTaskDelete(NULL);
+    }
+
+    // Nos posicionamos en offset_actual para retomar la reproducción
+    if (fseek(f, offset_actual, SEEK_SET) != 0) {
+        ESP_LOGE(TAG, "Error al posicionar el archivo en offset %d", (int)offset_actual);
+        fclose(f);
+        task_reproduccion = NULL;
+        offset_actual = 0;
+        vTaskDelete(NULL);
+    }
+
+    uint8_t buffer[512];
+    size_t leido = 0;
+
+    while ((leido = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+        xSemaphoreTake(mutex_estado, portMAX_DELAY);
+        if (estado != AUDIO_PLAYING) {
+            // Guardamos el offset actual para retomar después
+            offset_actual += ftell(f) - offset_actual;  // Esto es ftell(f) pero lo mismo que ftell porque fread ya avanzó el puntero
+            xSemaphoreGive(mutex_estado);
+            break;
+        }
         xSemaphoreGive(mutex_estado);
 
-        FILE *f = fopen(path_actual, "rb");
-        if (!f) {
-            ESP_LOGE(TAG, "No se pudo abrir %s", path_actual);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
+        size_t escrito = 0;
+        i2s_channel_write(tx_handle, buffer, leido, &escrito, portMAX_DELAY);
 
-        uint8_t buffer[512];
-        size_t leido = 0;
-
-        while ((leido = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-            xSemaphoreTake(mutex_estado, portMAX_DELAY);
-            if (estado != AUDIO_PLAYING) {
-                xSemaphoreGive(mutex_estado);
-                break;
-            }
-            xSemaphoreGive(mutex_estado);
-
-            size_t escrito = 0;
-            i2s_channel_write(tx_handle, buffer, leido, &escrito, portMAX_DELAY);
-        }
-
-        fclose(f);
-        vTaskDelay(pdMS_TO_TICKS(100));
+        offset_actual += leido;  // Actualizamos el offset después de escribir
     }
+
+    fclose(f);
+
+    // Si terminó la canción (llegó al final del archivo)
+    xSemaphoreTake(mutex_estado, portMAX_DELAY);
+    if (estado == AUDIO_PLAYING) {
+        // Canción terminada, reseteamos offset y estado
+        offset_actual = 0;
+        estado = AUDIO_STOPPED;
+    }
+    task_reproduccion = NULL;
+    xSemaphoreGive(mutex_estado);
+
+    ESP_LOGI(TAG, "Reproducción finalizada, tarea terminada.");
+
+    vTaskDelete(NULL);
 }
+
+
