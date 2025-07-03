@@ -8,6 +8,7 @@
 #include "esp_netif.h"
 #include <stdbool.h>
 #include <string.h>
+#include "led_embebido.h"
 
 static const char *TAG = "Módulo WiFi: ";
 static EventGroupHandle_t wifi_event_group;
@@ -23,7 +24,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
         ESP_LOGI(TAG, "Conectado a la red WiFi");
-
+        led_embebido_iniciar();
+        led_embebido_set_color(255 , 0, 0);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         if (wifi_event_group != NULL) {
             xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);

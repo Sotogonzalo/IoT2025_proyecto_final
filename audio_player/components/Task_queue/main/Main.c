@@ -1,22 +1,11 @@
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <stdio.h>
-#include <string.h>
-#include "Task_queue.h"
-#include "esp_log.h"
+#include "Task_queue.h"  
+void app_main() {
+    // Crea las tasks de prueba de la librería
+    xTaskCreate(user_input_task, "UserInput", 2048, NULL, 5, NULL);
+    xTaskCreate(music_player_task, "MusicPlayer", 2048, NULL, 5, NULL);
 
-static const char *TAG = "TaskQueue";
-void task_queue_init(task_queue_t *queue) {
-    memset(queue, 0, sizeof(task_queue_t));
-while (1) {
-        printf("Ingrese comando (up, down, queue, next, pause, play): ");
-        if (scanf("%31s", input) == 1) {
-            music_command_t cmd = parse_command(input);
-            if (cmd != CMD_INVALID) {
-                push_command(cmd);
-            } else {
-                printf("Comando inválido\n");
-            }
-        }
-    }
+    // El loop de main queda vacío porque FreeRTOS ejecuta las tasks
 }
