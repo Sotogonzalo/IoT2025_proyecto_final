@@ -9,6 +9,19 @@
 static entrada_log_t buffer_log[LOG_CAPACIDAD];
 static uint8_t log_index = 0;
 
+// guarda buffer circular en la flash
+static void guardar_buffer_nvs()
+{
+    nvs_handle_t handle;
+    if (nvs_open("storage", NVS_READWRITE, &handle) != ESP_OK)
+        return;
+    nvs_set_blob(handle, "log_buffer", buffer_log, sizeof(buffer_log));
+    nvs_set_u8(handle, "log_index", log_index);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+// carga el buffer ya guardado de la flash
+
 void event_logger_log_action(const char *accion, const char *cancion)
 {
     char timestamp[32];
@@ -22,17 +35,6 @@ void event_logger_log_action(const char *accion, const char *cancion)
     guardar_buffer_nvs();
 }
 
-// guarda buffer circular en la flash
-static void guardar_buffer_nvs()
-{
-    nvs_handle_t handle;
-    if (nvs_open("storage", NVS_READWRITE, &handle) != ESP_OK)
-        return;
-    nvs_set_blob(handle, "log_buffer", buffer_log, sizeof(buffer_log));
-    nvs_set_u8(handle, "log_index", log_index);
-    nvs_commit(handle);
-    nvs_close(handle);
-}
 // carga el buffer ya guardado de la flash
 static void cargar_buffer_nvs()
 {
