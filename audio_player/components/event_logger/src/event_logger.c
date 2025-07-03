@@ -4,9 +4,11 @@
 #include "nvs.h"
 #include <time.h>
 #include "event_logger.h"
+#include "tiempo_embebido.h"
 
 static entrada_log_t buffer_log[LOG_CAPACIDAD];
 static uint8_t log_index = 0;
+
 // guarda buffer circular en la flash
 static void guardar_buffer_nvs()
 {

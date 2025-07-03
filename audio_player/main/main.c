@@ -6,6 +6,7 @@
 #include "servidor_embebido.h"
 #include "mqtt_embebido.h"
 #include "event_logger.h"
+#include "tiempo_embebido.h"
 
 #define WIFI_SSID "Wifi"         // nombre de la red
 #define WIFI_PASS "diegosan5677" // contraseña de la red
@@ -27,16 +28,21 @@ static void publisher_task(void *arg)
         ESP_LOGI(TAG, "Publicado: %s", mensaje);
 
         // Obtener hora actual
-        time_t now;
-        struct tm timeinfo;
         char timestamp[32];
-
-        time(&now);
-        localtime_r(&now, &timeinfo);
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
-
-        // Loggear la acción
+        obtener_timestamp_actual(timestamp, sizeof(timestamp));
         event_logger_add("Mensaje MQTT publicado", timestamp);
+
+        // // Obtener hora actual
+        // time_t now;
+        // struct tm timeinfo;
+        // char timestamp[32];
+
+        // time(&now);
+        // localtime_r(&now, &timeinfo);
+        // strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+        // // Loggear la acción
+        // event_logger_add("Mensaje MQTT publicado", timestamp);
 
         vTaskDelay(pdMS_TO_TICKS(30000)); // 30s
     }
