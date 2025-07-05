@@ -11,6 +11,7 @@
 #include "queue_embebido.h"
 #include "config_embebido.h"
 #include "tiempo_embebido.h"
+#include "led_embebido.h"
 
 #define TAG "MAIN"
 
@@ -19,15 +20,17 @@ void app_main(void)
     montar_spiffs();
     audio_embebido_iniciar();
 
+    led_embebido_iniciar();
+
     // Cargar configuración desde NVS
     configuracion_t cfg;
     if (!config_cargar(&cfg)) {
-        ESP_LOGW(TAG, "No se pudo cargar configuración, usando valores por defecto.");
+        ESP_LOGW(TAG, "No se pudo cargar configuración con los valores guardados.");
 
-        snprintf(cfg.ssid, CONFIG_MAX_STR, "caliope");
-        snprintf(cfg.password, CONFIG_MAX_STR, "sinlugar");
-        snprintf(cfg.mqtt_uri, CONFIG_MAX_STR, "mqtt://broker.hivemq.com");
-        cfg.mqtt_port = 1883;
+        snprintf(cfg.ssid, CONFIG_MAX_STR, "Nombre_red");
+        snprintf(cfg.password, CONFIG_MAX_STR, "COntraseña_red");
+        snprintf(cfg.mqtt_uri, CONFIG_MAX_STR, "mqtt://broker.hivemq.com"); // Ejemplo de broker público HiveMQ
+        cfg.mqtt_port = 1883; // puerto por defecto del MQTT.
         config_guardar(&cfg);
 
     } else {

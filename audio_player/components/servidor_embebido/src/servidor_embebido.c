@@ -15,12 +15,12 @@
 
 extern void mqtt_embebido_start(const char *uri);
 
-httpd_handle_t server = NULL;
 #define HTTPD_507_INSUFFICIENT_STORAGE 507
-static const char *TAG = "Módulo Servidor Web";
 #define MAX_LINEA 272
 #define MAX_CANCIONES 5  // Debe coincidir con el macro de audio embebido
 #define MAX_PCMCANCION_BYTES (200 * 1024) // 200 KB máximo por canción PCM
+static const char *TAG = "Módulo Servidor Web";
+httpd_handle_t server = NULL;
 
 
 void actualizar_lista_reproduccion(void) {
@@ -28,12 +28,15 @@ void actualizar_lista_reproduccion(void) {
     const char *lista[MAX_CANCIONES];
     int count = 0;
 
+    // Abre el directorio /spiffs
     DIR *dir = opendir("/spiffs");
     if (!dir) {
         ESP_LOGE(TAG, "No se pudo abrir el directorio /spiffs");
         return;
     }
 
+    // Recorre los archivos en el directorio
+    // Filtra los archivos PCM y los agrega a la lista
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL && count < MAX_CANCIONES) {
         if (strstr(entry->d_name, ".pcm")) {
@@ -63,10 +66,13 @@ static esp_err_t raiz_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Leer el archivo completo
+    // Usamos ftell y rewind para obtener la longitud del archivo
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     rewind(f);
 
+    // Verificamos que el archivo no sea demasiado grande
     char *html = malloc(len + 1);
     if (!html) {
         fclose(f);
@@ -74,10 +80,14 @@ static esp_err_t raiz_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Leemos el contenido del archivo
+    // Aseguramos que el buffer tenga espacio para el terminador nulo
     fread(html, 1, len, f);
     html[len] = '\0';
     fclose(f);
 
+    // Reemplazamos las variables en el HTML
+    // Cargamos la configuración actual
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, len);
     free(html);
@@ -87,12 +97,17 @@ static esp_err_t raiz_get_handler(httpd_req_t *req) {
 // Handler POST /config_wifi
 static esp_err_t config_wifi_post_handler(httpd_req_t *req) {
     char buf[256];
+
+    // Verificamos que el tamaño del payload no exceda el buffer
+    // Usamos un tamaño fijo para evitar problemas de memoria
     int total_len = req->content_len;
     if (total_len >= sizeof(buf)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Payload demasiado grande");
         return ESP_FAIL;
     }
 
+    // Leemos el payload completo
+    // Usamos httpd_req_recv para recibir el contenido del request
     int recv_len = httpd_req_recv(req, buf, total_len);
     if (recv_len <= 0) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Error al recibir");
@@ -101,15 +116,19 @@ static esp_err_t config_wifi_post_handler(httpd_req_t *req) {
     buf[recv_len] = '\0';
     ESP_LOGI(TAG, "JSON WiFi recibido: %s", buf);
 
+    // Parseamos el JSON recibido
     cJSON *root = cJSON_Parse(buf);
     if (!root) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "JSON inválido");
         return ESP_FAIL;
     }
 
+    // Obtenemos los campos ssid y password del JSON
+    // Usamos cJSON_GetObjectItem para obtener los valores
     const cJSON *ssid = cJSON_GetObjectItem(root, "ssid");
     const cJSON *password = cJSON_GetObjectItem(root, "password");
 
+    // Verificamos que los campos sean válidos
     if (!cJSON_IsString(ssid) || !cJSON_IsString(password)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Campos faltantes en WiFi");
         cJSON_Delete(root);
@@ -117,7 +136,7 @@ static esp_err_t config_wifi_post_handler(httpd_req_t *req) {
     }
 
     configuracion_t cfg;
-    config_cargar(&cfg); // mantener mqtt_uri y puerto
+    config_cargar(&cfg); // mantiene mismo mqtt_uri y puerto
 
     bool cambiaron_credenciales =
         strncmp(cfg.ssid, ssid->valuestring, CONFIG_MAX_STR) != 0 ||
@@ -145,6 +164,7 @@ static esp_err_t config_wifi_post_handler(httpd_req_t *req) {
             timeout--;
         }
 
+        // Si no se pudo conectar al nuevo WiFi, informamos al cliente
         if (!wifi_esta_conectado()) {
             ESP_LOGW(TAG, "No se pudo conectar al nuevo WiFi. Por favor, envíe nuevas credenciales.");
             
@@ -160,11 +180,11 @@ static esp_err_t config_wifi_post_handler(httpd_req_t *req) {
         ESP_LOGI(TAG, "Las credenciales no cambiaron, sin reiniciar WiFi.");
     }
 
+    // cJSON_Delete libera la memoria del objeto JSON
     cJSON_Delete(root);
     httpd_resp_sendstr(req, "WiFi guardado correctamente");
     return ESP_OK;
 }
-
 
 // Handler POST /config_mqtt
 static esp_err_t config_mqtt_post_handler(httpd_req_t *req) {
@@ -175,6 +195,8 @@ static esp_err_t config_mqtt_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Leemos el payload completo
+    // Usamos httpd_req_recv para recibir el contenido del request
     int recv_len = httpd_req_recv(req, buf, total_len);
     if (recv_len <= 0) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Error al recibir");
@@ -199,7 +221,7 @@ static esp_err_t config_mqtt_post_handler(httpd_req_t *req) {
     }
 
     configuracion_t cfg;
-    config_cargar(&cfg); // mantener ssid y password actuales
+    config_cargar(&cfg); // mantiene ssid y password actuales
 
     strncpy(cfg.mqtt_uri, mqtt_uri->valuestring, CONFIG_MAX_STR);
     cfg.mqtt_port = mqtt_port->valueint;
@@ -212,8 +234,11 @@ static esp_err_t config_mqtt_post_handler(httpd_req_t *req) {
 
     ESP_LOGI(TAG, "MQTT actualizado: %s:%d", cfg.mqtt_uri, cfg.mqtt_port);
 
+    // Reiniciar MQTT con la nueva configuración
+    // Usamos snprintf para construir la URI MQTT
     char uri_mqtt[128];
     snprintf(uri_mqtt, sizeof(uri_mqtt), "mqtt://%s:%d", cfg.mqtt_uri, cfg.mqtt_port);
+    // Iniciamos el cliente MQTT con la nueva URI
     mqtt_embebido_start(uri_mqtt);
 
     cJSON_Delete(root);
@@ -237,15 +262,22 @@ static esp_err_t comando_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Aseguramos que el buffer tenga un terminador nulo
     buf[recv_len] = '\0';
     ESP_LOGI(TAG, "Comando recibido: %s", buf);
 
+    // Parseamos el JSON recibido
+    // Usamos cJSON_Parse para convertir el string JSON en un objeto cJSON
     cJSON *root = cJSON_Parse(buf);
     const cJSON *accion = cJSON_GetObjectItem(root, "accion");
 
+    // Verificamos que la acción sea un string
+    // usamos cJSON_IsString para validar el tipo
     if (cJSON_IsString(accion)) {
         ESP_LOGI(TAG, "Acción: %s", accion->valuestring);
-
+        
+        // Convertimos la acción a un comando válido
+        // Usamos parse_command para convertir el string a un enum music_command_t
         music_command_t cmd = parse_command(accion->valuestring);
         if (cmd != CMD_INVALID) {
             push_command(cmd);
@@ -261,7 +293,9 @@ static esp_err_t comando_post_handler(httpd_req_t *req) {
 
 // Handler POST /ver_log
 static esp_err_t ver_log_post_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "Solicitud /ver_log recibida, imprimiendo log en consola...");
+    ESP_LOGI(TAG, "Imprimiendo log en consola...");
+    // Llamamos a la función que imprime el log
+    // Esta función esta definida en event_logger.c
     event_logger_print();
 
     httpd_resp_sendstr(req, "Log impreso en consola");
@@ -288,17 +322,19 @@ static esp_err_t upload_pcm_handler(httpd_req_t *req) {
     }
     ESP_LOGI(TAG, "SPIFFS Total: %d bytes, Usado: %d bytes, Libre: %d bytes", total_spiffs, used_spiffs, total_spiffs - used_spiffs);
 
-    if (total_spiffs - used_spiffs < 320000) {
+    // Verificar espacio suficiente para la nueva canción
+    if (total_spiffs - used_spiffs < 220000) {
         ESP_LOGE(TAG, "No hay suficiente espacio en SPIFFS para el archivo");
         httpd_resp_send_err(req, HTTPD_507_INSUFFICIENT_STORAGE, "Espacio insuficiente en SPIFFS");
         return ESP_FAIL;
     }
 
-    // Construir ruta de archivo
+    // Construye ruta de archivo generico en spiffs
     char filename[64];
     snprintf(filename, sizeof(filename), "/spiffs/song%d.pcm", contador);
     ESP_LOGI(TAG, "Creando archivo: %s", filename);
 
+    // Verificar si el archivo ya existe
     FILE *f = fopen(filename, "wb");
     if (!f) {
         ESP_LOGE(TAG, "fopen falló para %s", filename);
@@ -310,7 +346,7 @@ static esp_err_t upload_pcm_handler(httpd_req_t *req) {
     int total = 0;
     int leido = 0;
 
-    // Leer datos del POST
+    // Lee datos del POST
     while ((leido = httpd_req_recv(req, buf, sizeof(buf))) > 0) {
         size_t escritos = fwrite(buf, 1, leido, f);
         if (escritos < (size_t)leido) {
@@ -322,6 +358,7 @@ static esp_err_t upload_pcm_handler(httpd_req_t *req) {
         total += escritos;
     }
 
+    // Verifica si hubo un error al leer
     if (leido < 0) {
         ESP_LOGE(TAG, "Error recibiendo datos del cliente");
         fclose(f);
@@ -334,10 +371,12 @@ static esp_err_t upload_pcm_handler(httpd_req_t *req) {
 
     contador++;
 
+    // Llamamos a la función que actualiza la lista de reproducción
     actualizar_lista_reproduccion();
 
     httpd_resp_sendstr(req, "Canción subida correctamente");
 
+    // Imprimir archivos en SPIFFS para depuración y ver que se agrego el nuevo archivo
     DIR *dir = opendir("/spiffs");
     if (dir) {
         struct dirent *ent;
@@ -361,9 +400,11 @@ static esp_err_t canciones_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Creamos un objeto JSON para almacenar las rutas de las canciones
     cJSON *json_array = cJSON_CreateArray();
     struct dirent *ent;
 
+    // Recorremos el directorio y agregamos las rutas de los archivos PCM al JSON
     while ((ent = readdir(dir)) != NULL) {
         if (strstr(ent->d_name, ".pcm")) {
             char path[264];
@@ -401,7 +442,7 @@ static esp_err_t delete_song_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Intentar eliminar el archivo
+    // Intenta eliminar el archivo
     if (remove(path) != 0) {
         ESP_LOGW(TAG, "No se pudo eliminar archivo: %s", path);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo eliminar el archivo");
@@ -410,6 +451,7 @@ static esp_err_t delete_song_handler(httpd_req_t *req) {
 
     ESP_LOGI(TAG, "Archivo eliminado: %s", path);
 
+    // Actualizamos la lista de reproducción después de eliminar la canción
     actualizar_lista_reproduccion();
 
     httpd_resp_sendstr(req, "Canción eliminada correctamente");

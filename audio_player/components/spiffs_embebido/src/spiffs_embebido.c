@@ -11,6 +11,7 @@
 void limpiar_spiffs(void);
 
 void montar_spiffs(void) {
+    // Configuración de SPIFFS
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
         .partition_label = NULL,
@@ -18,6 +19,7 @@ void montar_spiffs(void) {
         .format_if_mount_failed = false
     };
 
+    // Intentamos montar SPIFFS
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
 
     if (ret != ESP_OK) {
@@ -25,13 +27,13 @@ void montar_spiffs(void) {
         return;
     }
 
+    // Guardamos la información del directorio de archivos SPIFFS. Vemos si está vacío, el espacio ocupado y disponible que tiene.
     size_t total = 0, used = 0;
     ret = esp_spiffs_info(NULL, &total, &used);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "No se pudo obtener info de SPIFFS (%s)", esp_err_to_name(ret));
         return;
     }
-
 
     ESP_LOGI(TAG, "Montado SPIFFS con éxito. Total: %d bytes, Usado: %d bytes", total, used);
 }

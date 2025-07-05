@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 #define CONFIG_MAX_STR 64
+#define MAX_CANCIONES 5
 
 typedef struct {
     char ssid[CONFIG_MAX_STR];
@@ -12,10 +13,10 @@ typedef struct {
     int cancion_idx;
     int estado_audio;
     int offset_actual;
+    char canciones_actuales[MAX_CANCIONES][64];
 } configuracion_t;
 
 bool config_guardar(const configuracion_t *cfg);
 bool config_cargar(configuracion_t *cfg);
-void config_borrar_todo(void);
 
 #endif

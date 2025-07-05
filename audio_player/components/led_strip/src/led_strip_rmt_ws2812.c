@@ -106,7 +106,7 @@ void IRAM_ATTR ws2812_rmt_adapter(const void *src, rmt_item32_t *dest, size_t sr
 
 esp_err_t ws2812_set_pixel(led_strip_t *strip, uint32_t index, uint32_t red, uint32_t green, uint32_t blue)
 {
-    ESP_LOGI(TAG, "%s", __func__);
+    // ESP_LOGI(TAG, "%s", __func__);
 
     esp_err_t ret = ESP_OK;
     ws2812_t *ws2812 = __containerof(strip, ws2812_t, parent);
@@ -125,7 +125,7 @@ err:
 
 esp_err_t ws2812_refresh(led_strip_t *strip, uint32_t timeout_ms)
 {
-    ESP_LOGI(TAG, "%s", __func__);
+    // ESP_LOGI(TAG, "%s", __func__);
 
     esp_err_t ret = ESP_OK;
     ws2812_t *ws2812 = __containerof(strip, ws2812_t, parent);
@@ -139,7 +139,7 @@ err:
 
 esp_err_t ws2812_clear(led_strip_t *strip, uint32_t timeout_ms)
 {
-    ESP_LOGI(TAG, "%s", __func__);
+    // ESP_LOGI(TAG, "%s", __func__);
 
     ws2812_t *ws2812 = __containerof(strip, ws2812_t, parent);
     // Write zero to turn off all leds

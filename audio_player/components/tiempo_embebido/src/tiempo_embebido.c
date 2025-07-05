@@ -20,11 +20,11 @@ static void ntp_callback(struct timeval *tv)
 
 void tiempo_embebido_iniciar(void)
 {
-    // Configurar zona horaria a Uruguay
+    // Configuramos zona horaria a Uruguay
     setenv("TZ", "EST4EDT,M3.2.0/2,M11.1.0", 1);
     tzset();
 
-    // Configurar cliente SNTP
+    // Configuramos cliente SNTP
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, NTP_SERVIDOR);
     sntp_set_time_sync_notification_cb(ntp_callback);

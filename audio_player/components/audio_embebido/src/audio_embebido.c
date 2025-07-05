@@ -10,6 +10,7 @@
 #include <string.h>
 #include "config_embebido.h"
 #include "event_logger.h"
+#include "led_embebido.h"
 
 #define TAG "AUDIO_EMBEBIDO"
 #define MAX_CANCIONES 5
@@ -21,7 +22,7 @@ static i2s_chan_handle_t tx_handle = NULL;
 static es8311_handle_t es_handle = NULL;
 
 static size_t offset_actual = 0;
-static char lista_paths[MAX_CANCIONES][64];  // Paths a archivos .pcm
+static char lista_paths[MAX_CANCIONES][64];  // Paths a archivos .pcm, todos almacenados en /spiffs
 static int total_canciones = 0;
 static int cancion_actual = 0;
 
@@ -30,8 +31,10 @@ static int volumen_actual = 50;
 
 static SemaphoreHandle_t mutex_estado;
 static TaskHandle_t task_reproduccion = NULL;
+static TaskHandle_t task_parpadeo = NULL;
 
 static void tarea_reproduccion(void *param);
+static void tarea_chequeo_audio(void *param);
 
 i2s_chan_handle_t audio_embebido_get_tx_handle(void) {
     return tx_handle;
@@ -50,7 +53,7 @@ esp_err_t audio_embebido_iniciar(void) {
     ESP_ERROR_CHECK(i2c_param_config(I2C_NUM, &i2c_cfg));
     ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM, i2c_cfg.mode, 0, 0, 0));
 
-    // Codec init
+    // es8311 init
     es_handle = es8311_create(I2C_NUM, ES8311_ADDRRES_0);
     if (!es_handle) return ESP_FAIL;
 
@@ -100,8 +103,14 @@ esp_err_t audio_embebido_iniciar(void) {
     ESP_ERROR_CHECK(gpio_config(&gpio_cfg));
     ESP_ERROR_CHECK(gpio_set_level(PA_CTRL_IO, 1));
 
-    // Init del mutex
+    // mutex init
     mutex_estado = xSemaphoreCreateMutex();
+
+    // Creamos tarea del led al iniciar el audio
+    if (task_parpadeo == NULL) {
+        ESP_LOGI(TAG, "Creando tarea de parpadeo");
+        xTaskCreate(tarea_chequeo_audio, "tarea_parpadeo_led", 4096, NULL, 5, &task_parpadeo);
+    }
 
     return ESP_OK;
 }
@@ -109,7 +118,7 @@ esp_err_t audio_embebido_iniciar(void) {
 esp_err_t audio_embebido_cargar_lista(const char *const *paths, int cantidad) {
     if (cantidad > MAX_CANCIONES || cantidad < 0) return ESP_ERR_INVALID_ARG;
 
-    // Limpiar toda la lista
+    // Limpia toda la lista
     for (int i = 0; i < MAX_CANCIONES; i++) {
         lista_paths[i][0] = '\0';
     }
@@ -127,13 +136,13 @@ esp_err_t audio_embebido_cargar_lista(const char *const *paths, int cantidad) {
         total_canciones++;
     }
 
-    // Mostrar lista de reproducción
+    // Muestra lista de reproducción
     ESP_LOGI(TAG, "Lista de reproducción cargada (%d canciones):", total_canciones);
     for (int i = 0; i < total_canciones; i++) {
         ESP_LOGI(TAG, "  [%d] %s", i, lista_paths[i]);
     }
 
-    // Manejo de cancion_actual
+    // Manejaa el caso de que no haya canciones válidas
     if (total_canciones == 0) {
         cancion_actual = 0;
         audio_embebido_stop();
@@ -148,6 +157,7 @@ esp_err_t audio_embebido_cargar_lista(const char *const *paths, int cantidad) {
     return ESP_OK;
 }
 
+// Un print diseñado para mostrar información de la canción actual y las siguientes, sólo para ver el estado de la lista y saber dónde se esta ubicado.
 static void log_info_cancion(void) {
     ESP_LOGI(TAG, "Reproduciendo: %s", lista_paths[cancion_actual]);
 
@@ -164,7 +174,7 @@ static void log_info_cancion(void) {
 void audio_embebido_play(void) {
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
 
-    // Validar que haya canciones válidas
+    // Valida que haya canciones disponibles
     if (total_canciones == 0 || strlen(lista_paths[cancion_actual]) == 0) {
         ESP_LOGI(TAG, "No hay canciones en la lista de reproducción");
         xSemaphoreGive(mutex_estado);
@@ -230,6 +240,8 @@ void audio_embebido_next(void) {
         return;
     }
 
+    // Buscar la siguiente canción válida
+    // Comenzamos desde la canción actual y buscamos hacia adelante
     int nueva_pos = cancion_actual;
     for (int i = 1; i < MAX_CANCIONES; i++) {
         int idx = (cancion_actual + i) % MAX_CANCIONES;
@@ -239,6 +251,8 @@ void audio_embebido_next(void) {
         }
     }
 
+    // Si encontramos una canción diferente, actualizamos el índice
+    // y reiniciamos el offset
     if (nueva_pos != cancion_actual) {
         cancion_actual = nueva_pos;
         offset_actual = 0;
@@ -261,6 +275,7 @@ void audio_embebido_prev(void) {
         return;
     }
 
+    // Buscar la canción anterior válida
     int nueva_pos = cancion_actual;
     for (int i = 1; i < MAX_CANCIONES; i++) {
         int idx = (cancion_actual - i + MAX_CANCIONES) % MAX_CANCIONES;
@@ -270,6 +285,8 @@ void audio_embebido_prev(void) {
         }
     }
 
+    // Si cambiamos de canción, actualizamos el índice
+    // y reiniciamos el offset
     if (nueva_pos != cancion_actual) {
         cancion_actual = nueva_pos;
         offset_actual = 0;
@@ -334,7 +351,7 @@ static void tarea_reproduccion(void *param) {
     path_actual[sizeof(path_actual) - 1] = '\0';
 
     if (strlen(path_actual) == 0) {
-        ESP_LOGE(TAG, "Canción actual vacía. No se reproduce.");
+        ESP_LOGE(TAG, "Canción actual vacía.");
         task_reproduccion = NULL;
         offset_actual = 0;
         xSemaphoreGive(mutex_estado);
@@ -369,7 +386,7 @@ static void tarea_reproduccion(void *param) {
     while ((leido = fread(buffer, 1, sizeof(buffer), f)) > 0) {
         xSemaphoreTake(mutex_estado, portMAX_DELAY);
         if (estado != AUDIO_PLAYING) {
-            // Guardamos el offset actual para retomar después
+            // Guardamos el offset actual para retomar después del pause
             offset_actual += ftell(f) - offset_actual;
             xSemaphoreGive(mutex_estado);
             break;
@@ -384,10 +401,10 @@ static void tarea_reproduccion(void *param) {
 
     fclose(f);
 
-    // Si terminó la canción
+    // Si terminó la canción o se detuvo por comando
     xSemaphoreTake(mutex_estado, portMAX_DELAY);
     if (estado == AUDIO_PLAYING) {
-        // Canción terminada, reseteamos offset y estado
+        // Canción terminada, reseteamos offset y estado, para que la sig. canción comience desde el inicio.
         offset_actual = 0;
         estado = AUDIO_STOPPED;
     }
@@ -395,7 +412,7 @@ static void tarea_reproduccion(void *param) {
     audio_embebido_guardar_estado();
     xSemaphoreGive(mutex_estado);
 
-    ESP_LOGI(TAG, "Reproducción finalizada, tarea terminada.");
+    ESP_LOGI(TAG, "Reproducción finalizada.");
 
     vTaskDelete(NULL);
 }
@@ -409,6 +426,11 @@ void audio_embebido_guardar_estado(void) {
     cfg.estado_audio = estado;
     cfg.offset_actual = offset_actual;
 
+    for (int i = 0; i < MAX_CANCIONES; i++) {
+        strncpy(cfg.canciones_actuales[i], lista_paths[i], sizeof(cfg.canciones_actuales[i]) - 1);
+        cfg.canciones_actuales[i][sizeof(cfg.canciones_actuales[i]) - 1] = '\0';
+    }
+
     if (!config_guardar(&cfg)) {
         ESP_LOGW(TAG, "No se pudo guardar estado audio");
     }
@@ -421,10 +443,73 @@ void audio_embebido_cargar_estado(void) {
         estado = cfg.estado_audio;
         offset_actual = cfg.offset_actual;
 
-        ESP_LOGI(TAG, "Estado restaurado: cancion=%d, estado=%d, offset=%d",
-                 cancion_actual, estado, offset_actual);
+        total_canciones = 0;
+        for (int i = 0; i < MAX_CANCIONES; i++) {
+            if (strlen(cfg.canciones_actuales[i]) > 0) {
+                strncpy(lista_paths[total_canciones], cfg.canciones_actuales[i], sizeof(lista_paths[0]) - 1);
+                lista_paths[total_canciones][sizeof(lista_paths[0]) - 1] = '\0';
+                total_canciones++;
+            } else {
+                lista_paths[i][0] = '\0';
+            }
+        }
+
+        ESP_LOGI(TAG, "Lista restaurada (%d canciones):", total_canciones);
+        for (int i = 0; i < total_canciones; i++) {
+            ESP_LOGI(TAG, "  [%d] %s", i, lista_paths[i]);
+        }
+
     } else {
-        ESP_LOGI(TAG, "No se pudo cargar estado audio guardado");
+        ESP_LOGI(TAG, "No se pudo cargar estado y lista de canciones desde NVS");
     }
 }
 
+void tarea_chequeo_audio(void *param) {
+    bool led_on = false;
+
+    while (true) {
+        xSemaphoreTake(mutex_estado, portMAX_DELAY);
+        audio_estado_t estado_actual = estado;
+        xSemaphoreGive(mutex_estado);
+
+        switch (estado_actual) {
+            case AUDIO_PLAYING:
+                if (led_on) {
+                    led_embebido_set_color(0, 255, 0); // Verde
+                } else {
+                    led_embebido_apagar();
+                }
+                vTaskDelay(pdMS_TO_TICKS(300));
+                led_on = !led_on;
+                break;
+
+            case AUDIO_PAUSED:
+                if (led_on) {
+                    led_embebido_set_color(0, 0, 255); // Azul
+                } else {
+                    led_embebido_apagar();
+                }
+                vTaskDelay(pdMS_TO_TICKS(700));
+                led_on = !led_on;
+                break;
+
+            case AUDIO_STOPPED:
+                if (led_on) {
+                    led_embebido_set_color(255, 0, 0); // Rojo
+                } else {
+                    led_embebido_apagar();
+                }
+                vTaskDelay(pdMS_TO_TICKS(500));
+                led_on = !led_on;
+                break;
+
+            default:
+                led_embebido_apagar();
+                led_on = false;
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                break;
+        }
+    }
+
+    vTaskDelete(NULL);
+}
