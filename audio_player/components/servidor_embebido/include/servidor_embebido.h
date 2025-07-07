@@ -4,5 +4,6 @@
 #include "esp_http_server.h"
 
 httpd_handle_t iniciar_servidor_web(void);
+void detener_servidor_web(void);
 
 #endif

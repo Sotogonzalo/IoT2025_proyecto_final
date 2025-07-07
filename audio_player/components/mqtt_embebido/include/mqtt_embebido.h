@@ -4,20 +4,15 @@
 #include "mqtt_client.h"
 #include <stdbool.h>
 
-// Inicializa cliente MQTT con URI dinámico (ej: "mqtt://192.168.1.100:1883")
+// Inicia el cliente MQTT con la URI del broker
 void mqtt_embebido_start(const char *uri);
 
-// Publica un mensaje JSON en un tópico con QoS 1
-void mqtt_embebido_publicar_json(const char *topico, const char *json);
+// Publica un mensaje JSON en el tópico MQTT indicado
+void mqtt_embebido_publicar_json(const char *topico, const char *mensaje);
 
-// Para uso interno o diagnóstico
-// esp_mqtt_client_handle_t mqtt_embebido_get_client(void);
-
-// Llamada al conectarse para enviar logger
-// void mqtt_embebido_enviar_logger_pendiente(void);
-
-// Saber si el cliente está conectado
+// Indica si el cliente MQTT está conectado al broker
 bool mqtt_embebido_esta_conectado(void);
 
+void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data);
 
-#endif
+#endif // MQTT_EMBEBIDO_H

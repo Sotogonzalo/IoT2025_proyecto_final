@@ -13,15 +13,32 @@ bool config_guardar(const configuracion_t *cfg) {
     esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) return false;
 
-    nvs_set_str(nvs, "ssid", cfg->ssid);
-    nvs_set_str(nvs, "pass", cfg->password);
-    nvs_set_str(nvs, "mqtt_uri", cfg->mqtt_uri);
-    nvs_set_i32(nvs, "mqtt_port", cfg->mqtt_port);
+    err = nvs_set_str(nvs, "ssid", cfg->ssid);
+    err |= nvs_set_str(nvs, "pass", cfg->password);
+    err |= nvs_set_str(nvs, "mqtt_uri", cfg->mqtt_uri);
+    err |= nvs_set_i32(nvs, "mqtt_port", cfg->mqtt_port);
+
+    err |= nvs_set_i32(nvs, "cancion_idx", cfg->cancion_idx);
+    err |= nvs_set_i32(nvs, "estado_audio", cfg->estado_audio);
+    err |= nvs_set_i32(nvs, "offset_actual", cfg->offset_actual);
+
+    for (int i = 0; i < MAX_CANCIONES; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "song_%d", i);
+        err |= nvs_set_str(nvs, key, cfg->canciones_actuales[i]);
+    }
+
 
     err = nvs_commit(nvs);
     nvs_close(nvs);
-    ESP_LOGI(TAG, "Configuración guardada en NVS");
-    return err == ESP_OK;
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Configuración guardada en NVS");
+        return true;
+    } else {
+        ESP_LOGE(TAG, "Error guardando configuración: %d", err);
+        return false;
+    }
 }
 
 // Cargar configuración desde NVS
@@ -32,19 +49,56 @@ bool config_cargar(configuracion_t *cfg) {
 
     size_t len = CONFIG_MAX_STR;
 
-    err |= nvs_get_str(nvs, "ssid", cfg->ssid, &len);
+    err = nvs_get_str(nvs, "ssid", cfg->ssid, &len);
+    if (err != ESP_OK) goto fail;
+
     len = CONFIG_MAX_STR;
-    err |= nvs_get_str(nvs, "pass", cfg->password, &len);
+    err = nvs_get_str(nvs, "pass", cfg->password, &len);
+    if (err != ESP_OK) goto fail;
+
     len = CONFIG_MAX_STR;
-    err |= nvs_get_str(nvs, "mqtt_uri", cfg->mqtt_uri, &len);
-    int32_t puerto;
-    err |= nvs_get_i32(nvs, "mqtt_port", &puerto);
-    cfg->mqtt_port = puerto;
+    err = nvs_get_str(nvs, "mqtt_uri", cfg->mqtt_uri, &len);
+    if (err != ESP_OK) goto fail;
+
+    int32_t mqtt_port = 0;
+    err = nvs_get_i32(nvs, "mqtt_port", &mqtt_port);
+    if (err != ESP_OK) goto fail;
+    cfg->mqtt_port = mqtt_port;
+
+    int32_t cancion_idx = 0;
+    err = nvs_get_i32(nvs, "cancion_idx", &cancion_idx);
+    if (err != ESP_OK) goto fail;
+    cfg->cancion_idx = cancion_idx;
+
+    int32_t estado_audio = 0;
+    err = nvs_get_i32(nvs, "estado_audio", &estado_audio);
+    if (err != ESP_OK) goto fail;
+    cfg->estado_audio = estado_audio;
+
+    int32_t offset = 0;
+    err = nvs_get_i32(nvs, "offset_actual", &offset);
+    cfg->offset_actual = offset;
+    
+    for (int i = 0; i < MAX_CANCIONES; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "song_%d", i);
+        size_t len = CONFIG_MAX_STR;
+        
+        err = nvs_get_str(nvs, key, cfg->canciones_actuales[i], &len);
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            cfg->canciones_actuales[i][0] = '\0';
+        } else if (err != ESP_OK) {
+            ESP_LOGW(TAG, "No se pudo leer %s: %s", key, esp_err_to_name(err));
+            cfg->canciones_actuales[i][0] = '\0';
+        }
+    }
+
 
     nvs_close(nvs);
-    return err == ESP_OK;
-}
+    return true;
 
-void config_borrar_todo(void) {
-    nvs_flash_erase();
+fail:
+    nvs_close(nvs);
+    return false;
 }
