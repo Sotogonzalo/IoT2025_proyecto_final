@@ -38,9 +38,9 @@ void app_main(void)
         ESP_LOGW(TAG, "No se pudo cargar configuración desde NVS, inicializando con valores por defecto.");
 
         memset(&cfg, 0, sizeof(cfg));
-        strncpy(cfg.ssid, "Fraga", CONFIG_MAX_STR - 1);
+        strncpy(cfg.ssid, "caliope", CONFIG_MAX_STR - 1);
         cfg.ssid[CONFIG_MAX_STR - 1] = '\0';
-        strncpy(cfg.password, "Fraga188", CONFIG_MAX_STR - 1);
+        strncpy(cfg.password, "sinlugar", CONFIG_MAX_STR - 1);
         cfg.password[CONFIG_MAX_STR - 1] = '\0';
 
         // También dejá vacía la URI MQTT para evitar confusiones
