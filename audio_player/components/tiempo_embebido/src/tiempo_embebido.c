@@ -53,25 +53,6 @@ bool tiempo_embebido_esta_sincronizado(void)
     return tiempo_sincronizado;
 }
 
-void tiempo_embebido_mostrar_hora_actual(void)
-{
-    time_t now;
-    struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
-
-    if (timeinfo.tm_year < (2020 - 1900))
-    {
-        ESP_LOGW(TAG, "La hora aún no fue sincronizada correctamente");
-    }
-    else
-    {
-        char buffer[64];
-        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
-        ESP_LOGI(TAG, "Hora actual: %s", buffer);
-    }
-}
-
 bool tiempo_embebido_obtener_timestamp(char *buffer, size_t max_len)
 {
     if (!buffer || max_len == 0)

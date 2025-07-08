@@ -14,14 +14,14 @@
 #include "event_logger.h"
 
 extern void mqtt_embebido_start(const char *uri);
+extern void mqtt_embebido_stop(void);
 
 #define HTTPD_507_INSUFFICIENT_STORAGE 507
 #define MAX_LINEA 272
 #define MAX_CANCIONES 5  // Debe coincidir con el macro de audio embebido
 #define MAX_PCMCANCION_BYTES (200 * 1024) // 200 KB máximo por canción PCM
-static const char *TAG = "Módulo Servidor Web";
+static const char *TAG = "SERVIDOR_EMBEBIDO";
 httpd_handle_t server = NULL;
-
 
 void actualizar_lista_reproduccion(void) {
     static char canciones[MAX_CANCIONES][MAX_LINEA];
@@ -53,7 +53,7 @@ void actualizar_lista_reproduccion(void) {
     if (count > 0) {
         ESP_LOGI(TAG, "Lista de reproducción actualizada con %d canciones", count);
     } else {
-        ESP_LOGW(TAG, "No se encontraron canciones .pcm en /spiffs");
+        ESP_LOGI(TAG, "No se encontraron canciones .pcm en /spiffs");
     }
 
 }
@@ -136,54 +136,60 @@ static esp_err_t config_wifi_post_handler(httpd_req_t *req) {
     }
 
     configuracion_t cfg;
-    config_cargar(&cfg); // mantiene mismo mqtt_uri y puerto
+    config_cargar(&cfg); //Cargamos la config actual desde NVS
+
+    // Guardamos las nuevas credenciales temporalmente
+    const char *nuevo_ssid = ssid->valuestring;
+    const char *nuevo_pass = password->valuestring;
 
     bool cambiaron_credenciales =
-        strncmp(cfg.ssid, ssid->valuestring, CONFIG_MAX_STR) != 0 ||
-        strncmp(cfg.password, password->valuestring, CONFIG_MAX_STR) != 0;
+    strcmp(cfg.ssid, nuevo_ssid) != 0 ||
+    strcmp(cfg.password, nuevo_pass) != 0;
 
-    strncpy(cfg.ssid, ssid->valuestring, CONFIG_MAX_STR);
-    strncpy(cfg.password, password->valuestring, CONFIG_MAX_STR);
-
-    if (!config_guardar(&cfg)) {
-        cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo guardar WiFi");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "WiFi actualizado: SSID=%s", cfg.ssid);
+    ESP_LOGI(TAG, "Comparando credenciales:");
+    ESP_LOGI(TAG, "SSID actual: \"%s\" vs nuevo: \"%s\"", cfg.ssid, nuevo_ssid);
+    ESP_LOGI(TAG, "PASS actual: \"%s\" vs nuevo: \"%s\"", cfg.password, nuevo_pass);
 
     if (cambiaron_credenciales) {
-        ESP_LOGI(TAG, "Reiniciando WiFi con nuevas credenciales...");
-        reiniciar_wifi_sta(cfg.ssid, cfg.password);
+        strncpy(cfg.ssid, ssid->valuestring, CONFIG_MAX_STR);
+        cfg.ssid[CONFIG_MAX_STR - 1] = '\0';
+        strncpy(cfg.password, password->valuestring, CONFIG_MAX_STR);
+        cfg.password[CONFIG_MAX_STR - 1] = '\0';
 
-        // Esperamos a que conecte (máx. 10 segundos)
-        int timeout = 10;
-        while (timeout > 0 && !wifi_esta_conectado()) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            timeout--;
-        }
-
-        // Si no se pudo conectar al nuevo WiFi, informamos al cliente
-        if (!wifi_esta_conectado()) {
-            ESP_LOGW(TAG, "No se pudo conectar al nuevo WiFi. Por favor, envíe nuevas credenciales.");
-            
-            httpd_resp_set_status(req, "408 Request Timeout");
-            httpd_resp_send(req, "No se pudo conectar al nuevo WiFi", HTTPD_RESP_USE_STRLEN);
+        ESP_LOGI(TAG, "Credenciales cambiaron, guardando y lanzando tarea para reiniciar WiFi...");
+        
+        if (!config_guardar(&cfg)) {
             cJSON_Delete(root);
-            
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo guardar WiFi en NVS");
             return ESP_FAIL;
         }
 
+        // Lanzamos la tarea que hará el reinicio del WiFi (fuera del contexto handler)
+        if (xTaskCreate(&tarea_reiniciar_wifi, "tarea_reiniciar_wifi", 4096, NULL, 5, NULL) != pdPASS) {
+            ESP_LOGE(TAG, "Error al crear tarea de reinicio WiFi");
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo iniciar tarea reinicio WiFi");
+            return ESP_FAIL;
+        }
+
+        // Respondemos rápido que aceptamos el cambio
+        httpd_resp_sendstr(req, "Credenciales recibidas, reiniciando WiFi...");
+        cJSON_Delete(root);
+        return ESP_OK;
 
     } else {
         ESP_LOGI(TAG, "Las credenciales no cambiaron, sin reiniciar WiFi.");
-    }
 
-    // cJSON_Delete libera la memoria del objeto JSON
-    cJSON_Delete(root);
-    httpd_resp_sendstr(req, "WiFi guardado correctamente");
-    return ESP_OK;
+        if (!config_guardar(&cfg)) {
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo guardar WiFi en NVS");
+            return ESP_FAIL;
+        }
+
+        httpd_resp_sendstr(req, "Credenciales sin cambio, guardadas correctamente");
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
 }
 
 // Handler POST /config_mqtt
@@ -223,27 +229,40 @@ static esp_err_t config_mqtt_post_handler(httpd_req_t *req) {
     configuracion_t cfg;
     config_cargar(&cfg); // mantiene ssid y password actuales
 
-    strncpy(cfg.mqtt_uri, mqtt_uri->valuestring, CONFIG_MAX_STR);
-    cfg.mqtt_port = mqtt_port->valueint;
+    // Comparamos credenciales actuales vs nuevas
+    bool cambiaron_credenciales = strncmp(cfg.mqtt_uri, mqtt_uri->valuestring, CONFIG_MAX_STR) != 0 ||
+                     cfg.mqtt_port != mqtt_port->valueint;
 
-    if (!config_guardar(&cfg)) {
+    if (cambiaron_credenciales) {
+        strncpy(cfg.mqtt_uri, mqtt_uri->valuestring, CONFIG_MAX_STR - 1);
+        cfg.mqtt_uri[CONFIG_MAX_STR - 1] = '\0';
+        cfg.mqtt_port = mqtt_port->valueint;
+
+        ESP_LOGI(TAG, "MQTT actualizado: %s:%d", cfg.mqtt_uri, cfg.mqtt_port);
+
+        if (!config_guardar(&cfg)) {
+            ESP_LOGE(TAG, "Error guardando configuración MQTT");
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo guardar MQTT");
+            return ESP_FAIL;
+        }
+
+        mqtt_embebido_stop();
+
+        char uri_mqtt[128];
+        snprintf(uri_mqtt, sizeof(uri_mqtt), "mqtt://%s:%d", cfg.mqtt_uri, cfg.mqtt_port);
+
+        mqtt_embebido_start(uri_mqtt);
+
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No se pudo guardar MQTT");
-        return ESP_FAIL;
+        httpd_resp_sendstr(req, "MQTT guardado correctamente");
+        return ESP_OK;
+    }else {
+        ESP_LOGI(TAG, "Las credenciales MQTT no cambiaron, no se reinicia cliente.");
+        cJSON_Delete(root);
+        httpd_resp_sendstr(req, "MQTT sin cambios");
+        return ESP_OK;
     }
-
-    ESP_LOGI(TAG, "MQTT actualizado: %s:%d", cfg.mqtt_uri, cfg.mqtt_port);
-
-    // Reiniciar MQTT con la nueva configuración
-    // Usamos snprintf para construir la URI MQTT
-    char uri_mqtt[128];
-    snprintf(uri_mqtt, sizeof(uri_mqtt), "mqtt://%s:%d", cfg.mqtt_uri, cfg.mqtt_port);
-    // Iniciamos el cliente MQTT con la nueva URI
-    mqtt_embebido_start(uri_mqtt);
-
-    cJSON_Delete(root);
-    httpd_resp_sendstr(req, "MQTT guardado correctamente");
-    return ESP_OK;
 }
 
 // Handler POST /comando
@@ -510,10 +529,16 @@ httpd_handle_t iniciar_servidor_web(void) {
 
 void detener_servidor_web(void) {
     if (server != NULL) {
+        mqtt_embebido_stop();
+        vTaskDelay(pdMS_TO_TICKS(500));
         ESP_LOGI(TAG, "Deteniendo servidor web...");
         httpd_stop(server);
         server = NULL;
     } else {
         ESP_LOGW(TAG, "Servidor web ya detenido o no inicializado");
     }
+}
+
+bool servidor_web_esta_activo(void) {
+    return server != NULL;
 }

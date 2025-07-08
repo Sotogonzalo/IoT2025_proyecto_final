@@ -5,29 +5,55 @@
 #include <string.h>
 
 #define CONFIG_NAMESPACE "app_cfg"
-static const char *TAG = "Config";
+static const char *TAG = "CONFIG_EMBEBIDO";
+
+esp_err_t config_embebido_init(void) {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "Reinicializando NVS...");
+        ret = nvs_flash_erase();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Error borrando NVS: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        ret = nvs_flash_init();
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error inicializando NVS: %s", esp_err_to_name(ret));
+    }
+    return ret;
+}
 
 // Guardar la configuración en NVS
 bool config_guardar(const configuracion_t *cfg) {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) return false;
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error abriendo NVS: %s", esp_err_to_name(err));
+        return false;
+    }
 
-    err = nvs_set_str(nvs, "ssid", cfg->ssid);
-    err |= nvs_set_str(nvs, "pass", cfg->password);
-    err |= nvs_set_str(nvs, "mqtt_uri", cfg->mqtt_uri);
-    err |= nvs_set_i32(nvs, "mqtt_port", cfg->mqtt_port);
+    // Guardar los campos principales
+    if (nvs_set_str(nvs, "ssid", cfg->ssid) != ESP_OK ||
+        nvs_set_str(nvs, "pass", cfg->password) != ESP_OK ||
+        nvs_set_str(nvs, "mqtt_uri", cfg->mqtt_uri) != ESP_OK ||
+        nvs_set_i32(nvs, "mqtt_port", cfg->mqtt_port) != ESP_OK ||
+        nvs_set_i32(nvs, "cancion_idx", cfg->cancion_idx) != ESP_OK ||
+        nvs_set_i32(nvs, "estado_audio", cfg->estado_audio) != ESP_OK ||
+        nvs_set_i32(nvs, "offset_actual", cfg->offset_actual) != ESP_OK) {
+        ESP_LOGE(TAG, "Error guardando configuración base en NVS");
+        nvs_close(nvs);
+        return false;
+    }
 
-    err |= nvs_set_i32(nvs, "cancion_idx", cfg->cancion_idx);
-    err |= nvs_set_i32(nvs, "estado_audio", cfg->estado_audio);
-    err |= nvs_set_i32(nvs, "offset_actual", cfg->offset_actual);
-
+    // Guardar canciones
     for (int i = 0; i < MAX_CANCIONES; i++) {
         char key[16];
         snprintf(key, sizeof(key), "song_%d", i);
-        err |= nvs_set_str(nvs, key, cfg->canciones_actuales[i]);
+        if (nvs_set_str(nvs, key, cfg->canciones_actuales[i]) != ESP_OK) {
+            ESP_LOGW(TAG, "No se pudo guardar %s", key);
+        }
     }
-
 
     err = nvs_commit(nvs);
     nvs_close(nvs);
@@ -36,13 +62,17 @@ bool config_guardar(const configuracion_t *cfg) {
         ESP_LOGI(TAG, "Configuración guardada en NVS");
         return true;
     } else {
-        ESP_LOGE(TAG, "Error guardando configuración: %d", err);
+        ESP_LOGE(TAG, "Error al hacer commit: %s", esp_err_to_name(err));
         return false;
     }
 }
 
+
 // Cargar configuración desde NVS
 bool config_cargar(configuracion_t *cfg) {
+
+    memset(cfg, 0, sizeof(configuracion_t)); // Limpia toda la estructura
+
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READONLY, &nvs);
     if (err != ESP_OK) return false;
@@ -94,11 +124,18 @@ bool config_cargar(configuracion_t *cfg) {
         }
     }
 
+    ESP_LOGI(TAG, "Configuración cargada correctamente:");
+    ESP_LOGI(TAG, "  SSID: %s", cfg->ssid);
+    ESP_LOGI(TAG, "  MQTT URI: %s", cfg->mqtt_uri);
+    ESP_LOGI(TAG, "  MQTT Port: %d", cfg->mqtt_port);
+    ESP_LOGI(TAG, "  Canción actual: %d, Estado: %d, Offset: %d",
+             cfg->cancion_idx, cfg->estado_audio, cfg->offset_actual);
 
     nvs_close(nvs);
     return true;
 
 fail:
+    ESP_LOGW(TAG, "Error al cargar configuración desde NVS: %s", esp_err_to_name(err));
     nvs_close(nvs);
     return false;
 }

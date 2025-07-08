@@ -7,6 +7,12 @@
 // Inicia el cliente MQTT con la URI del broker
 void mqtt_embebido_start(const char *uri);
 
+// Detiene el cliente MQTT y libera recursos
+void mqtt_embebido_stop(void);
+
+// Indica si el cliente MQTT está conectado al broker
+bool mqtt_embebido_esta_conectado(void);
+
 // Publica un mensaje JSON en el tópico MQTT indicado
 void mqtt_embebido_publicar_json(const char *topico, const char *mensaje);
 

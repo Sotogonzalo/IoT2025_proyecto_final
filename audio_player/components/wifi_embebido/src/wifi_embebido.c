@@ -6,13 +6,14 @@
 #include "esp_event.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
+#include <inttypes.h>
 #include <stdbool.h>
 #include <string.h>
+#include "mqtt_embebido.h"
+#include "config_embebido.h"
+#include "servidor_embebido.h"
 
-extern void iniciar_servidor_web(void);
-extern void detener_servidor_web(void);
-
-static const char *TAG = "Módulo WiFi";
+static const char *TAG = "WIFI_EMBEBIDO";
 
 static EventGroupHandle_t wifi_event_group = NULL;
 #define WIFI_CONNECTED_BIT BIT0
@@ -25,13 +26,6 @@ static bool eventos_registrados = false;
 
 esp_err_t iniciar_wifi_embebido(void) {
     if (inicializado) return ESP_OK;
-
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -46,37 +40,32 @@ esp_err_t iniciar_wifi_embebido(void) {
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data) {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-        ESP_LOGI(TAG, "Intentando conectar a la red...");
+    if (event_base == WIFI_EVENT) {
+        switch (event_id) {
+            case WIFI_EVENT_STA_START:
+                ESP_LOGI(TAG, "WiFi STA iniciado");
+                esp_wifi_connect();
+                break;
 
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
-        ESP_LOGI(TAG, "Conectado a la red WiFi");
+            case WIFI_EVENT_STA_CONNECTED:
+                ESP_LOGI(TAG, "WiFi STA conectado");
+                break;
+
+            case WIFI_EVENT_STA_DISCONNECTED:
+                ESP_LOGW(TAG, "WiFi STA desconectado");
+                if (wifi_event_group) {
+                    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+                }
+                break;
+        }
 
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        if (wifi_event_group != NULL) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
+        ESP_LOGI(TAG, "IP obtenida: " IPSTR, IP2STR(&event->ip_info.ip));
+
+        if (wifi_event_group) {
             xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
-            ESP_LOGI(TAG, "IP obtenida correctamente");
-
-            iniciar_servidor_web();
-        } else {
-            ESP_LOGE(TAG, "wifi_event_group no inicializado.");
         }
-
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START) {
-        ESP_LOGI(TAG, "Modo AP iniciado");
-
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        detener_servidor_web();
-
-        esp_wifi_connect();
-        if (wifi_event_group != NULL) {
-            xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        } else {
-            ESP_LOGE(TAG, "wifi_event_group no inicializado.");
-        }
-
-        ESP_LOGW(TAG, "Desconectado de WiFi. Reintentando conexión...");
     }
 }
 
@@ -161,8 +150,27 @@ void iniciar_wifi_ap(const char *ssid, const char *password) {
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
+// Tarea que reinicia el WiFi fuera del contexto de los handlers web
+void tarea_reiniciar_wifi(void *param) {
+    vTaskDelay(pdMS_TO_TICKS(500));  // Esperar a que el handler devuelva respuesta y libere socket
+
+    configuracion_t cfg;
+    config_cargar(&cfg);
+
+    reiniciar_wifi_sta(cfg.ssid, cfg.password);
+
+    vTaskDelete(NULL);
+}
+
 void reiniciar_wifi_sta(const char *ssid, const char *password) {
     ESP_LOGI(TAG, "Reiniciando WiFi con nuevas credenciales...");
+
+    bool reiniciar_mqtt = mqtt_embebido_esta_conectado();
+
+    if (reiniciar_mqtt) {
+        ESP_LOGI(TAG, "Deteniendo MQTT antes del reinicio");
+        mqtt_embebido_stop();
+    }
 
     if (!inicializado) {
         iniciar_wifi_embebido();
@@ -178,6 +186,31 @@ void reiniciar_wifi_sta(const char *ssid, const char *password) {
     }
 
     iniciar_wifi_sta(ssid, password);
+
+    // Esperamos reconexión (máx. 10 segundos)
+    int intentos = 10;
+    while (intentos-- > 0 && !wifi_esta_conectado()) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    if (!wifi_esta_conectado()) {
+        ESP_LOGW(TAG, "No se pudo conectar a la nueva red WiFi.");
+        return;
+    }
+
+    // Reiniciar servidor web solo si estaba activo (puedes agregar función para verificarlo)
+    if (servidor_web_esta_activo()) {
+        detener_servidor_web();
+        iniciar_servidor_web();
+    }
+
+    if (reiniciar_mqtt) {
+        configuracion_t cfg;
+        config_cargar(&cfg);
+        char uri_mqtt[128];
+        snprintf(uri_mqtt, sizeof(uri_mqtt), "mqtt://%s:%d", cfg.mqtt_uri, cfg.mqtt_port);
+        mqtt_embebido_start(uri_mqtt);
+    }
 }
 
 bool wifi_esta_conectado(void) {

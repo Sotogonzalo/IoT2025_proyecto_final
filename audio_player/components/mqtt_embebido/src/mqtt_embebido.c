@@ -4,7 +4,7 @@
 #include "queue_embebido.h"
 #include "event_logger.h"
 
-static const char *TAG = "MQTT";
+static const char *TAG = "MQTT_EMBEBIDO";
 static esp_mqtt_client_handle_t client = NULL;
 static bool conectado = false;
 
@@ -71,14 +71,33 @@ void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void
 }
 
 void mqtt_embebido_start(const char *uri) {
+    const char *will_topic = "iot/demo/" MI_ID "/status";
+    const char *will_msg = "Se perdió la conexión";
+
     esp_mqtt_client_config_t cfg = {
         .broker.address.uri = uri,
-        .credentials.client_id = MI_ID
+        .credentials.client_id = MI_ID,
+        .session.last_will = {
+            .topic = will_topic,
+            .msg = will_msg,
+            .qos = 1,
+            .retain = true
+        }
     };
 
     client = esp_mqtt_client_init(&cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
+}
+
+void mqtt_embebido_stop(void) {
+    if (client != NULL) {
+        esp_mqtt_client_stop(client);
+        esp_mqtt_client_destroy(client);
+        client = NULL;
+        conectado = false;
+        ESP_LOGI(TAG, "MQTT detenido");
+    }
 }
 
 void mqtt_embebido_publicar_json(const char *topico, const char *mensaje) {

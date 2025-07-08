@@ -2,6 +2,7 @@
 #include "audio_embebido.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include <string.h>
 
@@ -11,37 +12,71 @@
 
 static music_command_t command_queue[MAX_COMMANDS];
 static int command_count = 0;
+static SemaphoreHandle_t mutex_cola = NULL;
+
+void queue_embebido_init(void) {
+    if (mutex_cola == NULL) {
+        mutex_cola = xSemaphoreCreateMutex();
+        if (mutex_cola == NULL) {
+            ESP_LOGE(TAG, "Error al crear el mutex de la cola");
+        } else {
+            ESP_LOGI(TAG, "Mutex de la cola creado correctamente");
+        }
+    }
+}
 
 void print_command_queue(void) {
+    if (!mutex_cola) return;
+
+    xSemaphoreTake(mutex_cola, portMAX_DELAY);
     ESP_LOGI(TAG, "Estado de la cola (%d comandos):", command_count);
     for (int i = 0; i < command_count; i++) {
         ESP_LOGI(TAG, " [%d]: %d", i, command_queue[i]);
     }
+    xSemaphoreGive(mutex_cola);
 }
 
+
 void push_command(music_command_t cmd) {
+    bool new_command = false;
+
+    if (!mutex_cola) return;
+
+    xSemaphoreTake(mutex_cola, portMAX_DELAY);
+
     if (command_count < MAX_COMMANDS) {
         command_queue[command_count++] = cmd;
         ESP_LOGI(TAG, "Comando agregado: %d", cmd);
-        print_command_queue();
+        new_command = true;
     } else {
         ESP_LOGW(TAG, "Cola llena, comando no agregado");
     }
+
+    xSemaphoreGive(mutex_cola);
+
+    if (new_command) {
+        print_command_queue();
+    }
 }
 
+
 music_command_t pop_command(void) {
+    if (!mutex_cola) return CMD_INVALID;
+
+    xSemaphoreTake(mutex_cola, portMAX_DELAY);
+
     music_command_t cmd = CMD_INVALID;
     if (command_count > 0) {
         cmd = command_queue[0];
-
         for (int i = 1; i < command_count; i++) {
-            command_queue[i-1] = command_queue[i];
+            command_queue[i - 1] = command_queue[i];
         }
         command_count--;
     }
+
+    xSemaphoreGive(mutex_cola);
     return cmd;
 }
-
 
 void volume_up(void) {
     ESP_LOGI(TAG, "Subiendo volumen");

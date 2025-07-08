@@ -109,7 +109,7 @@ esp_err_t audio_embebido_iniciar(void) {
     // Creamos tarea del led al iniciar el audio
     if (task_parpadeo == NULL) {
         ESP_LOGI(TAG, "Creando tarea de parpadeo");
-        xTaskCreate(tarea_chequeo_audio, "tarea_parpadeo_led", 4096, NULL, 5, &task_parpadeo);
+        xTaskCreate(tarea_chequeo_audio, "tarea_parpadeo_led", 4096, NULL, 2, &task_parpadeo);
     }
 
     return ESP_OK;
@@ -385,11 +385,19 @@ static void tarea_reproduccion(void *param) {
 
     while ((leido = fread(buffer, 1, sizeof(buffer), f)) > 0) {
         xSemaphoreTake(mutex_estado, portMAX_DELAY);
-        if (estado != AUDIO_PLAYING) {
+        if (estado == AUDIO_PAUSED) {
             // Guardamos el offset actual para retomar después del pause
             offset_actual += ftell(f) - offset_actual;
             xSemaphoreGive(mutex_estado);
             break;
+        }
+        if (estado == AUDIO_STOPPED) {
+            // Si se detuvo, salimos de la tarea
+            fclose(f);
+            task_reproduccion = NULL;
+            offset_actual = 0;
+            xSemaphoreGive(mutex_estado);
+            vTaskDelete(NULL);
         }
         xSemaphoreGive(mutex_estado);
 

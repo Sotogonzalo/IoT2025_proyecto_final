@@ -12,6 +12,7 @@ typedef enum {
     CMD_INVALID
 } music_command_t;
 
+void queue_embebido_init(void);
 void push_command(music_command_t cmd);
 music_command_t pop_command(void);
 music_command_t parse_command(const char *str);

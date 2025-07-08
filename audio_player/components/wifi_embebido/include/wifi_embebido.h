@@ -9,5 +9,6 @@ void iniciar_wifi_sta(const char *ssid, const char *password);
 void iniciar_wifi_ap(const char *ssid, const char *password);
 bool wifi_esta_conectado(void);
 void reiniciar_wifi_sta(const char *ssid, const char *password);
+void tarea_reiniciar_wifi(void *param);
 
 #endif // WIFI_EMBEBIDO_H
